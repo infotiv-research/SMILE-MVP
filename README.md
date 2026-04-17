@@ -2,18 +2,11 @@
 
 # How to populate the `Data` and `models` directories
 
-- Volvo data: - WP6 - PrototypesDemonstrators (Volvo)\datasets\(CONFIDENTIAL) Tuve dataset
+- **Volvo Tuve dataset**: - WP6 - PrototypesDemonstrators (Volvo)\datasets\(CONFIDENTIAL) 
+- **Anomaly detections (Jesper)**: WP6 - PrototypesDemonstrators (Volvo)\datasets\ood_detections
+- Play JSON-data/final.json and display trajectory + maneuver classes (Thanh). Original codes are at P119522 - SMILE IV - General\Volvo Trajectories.
+- Play Joakim predictions (load analysis.json). Original codes are at P119522 - SMILE IV - General\Joakim:
 
-- MVP codes: WP6 - PrototypesDemonstrators (Volvo)\datasets\(CONFIDENTIAL) Tuve dataset\MVP
-
-- Anomaly detections (Jesper): WP6 - PrototypesDemonstrators (Volvo)\datasets\ood_detections
-
-- Play JSON-data/final.json and display trajectory + maneuver classes (Thanh). Original codes are at P119522 - SMILE IV - General\Volvo Trajectories. python .\trajectory_player.py --gui
-
-- Play Joakim predictions (load temp4_with_analysis.json). Original codes are at P119522 - SMILE IV - General\Joakim:
-play_lstm_results.py
-
-- Run MVP simple (still need old data file thanh_object_tracks2) DOES NOT WORK YET. tuve_mvp.py
 
 # Quick start
 
@@ -23,6 +16,7 @@ Run `tree -L 2` to make sure that all the data files are correctly placed in you
 .
 ├── Data
 │   ├── (CONFIDENTIAL) Tuve dataset
+│   ├── ood_detections
 │   └── obstacles_and_forklifts
 ├── JSON-data
 │   ├── analysis.json

@@ -23,6 +23,28 @@ from matplotlib.figure import Figure
 
 MASK_FOLDER = "Data/(CONFIDENTIAL) Tuve dataset/bev_res/"
 SAVE_PATH = "JSON-data/object_tracks.json"
+WINDOW_RANGE = (500, 1700)
+HORIZON = 10
+BASE_SPEED = 10.0
+VEHICLE_RADIUS = 20.0
+MAX_DISTANCE = 150.0
+MIN_COSINE = np.cos(np.deg2rad(60))
+OOD_ROOT = "Data/ood_detections/"
+
+# ==========================================================
+# LOAD STATIC DATA
+# ==========================================================
+
+mask_files = sorted(
+    f for f in os.listdir(MASK_FOLDER) if f.lower().endswith(".jpg")
+)[WINDOW_RANGE[0] : WINDOW_RANGE[1]]
+
+with open("Models/camera_visibility_lookup_table.pkl", "rb") as f:
+    lookup_table = pickle.load(f)
+
+# ==========================================================
+# DATA ADAPTORS (unchanged)
+# ==========================================================
 
 def load_tracks_auto(path):
     with open(path, "r") as f:
