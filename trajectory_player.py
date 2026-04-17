@@ -14,13 +14,13 @@ def ensure_dir(d: str):
     os.makedirs(d, exist_ok=True)
 
 def models_dir() -> str:
-    d = os.path.join(os.getcwd(), "models")
+    d = os.path.join(os.getcwd(), "Models")
     ensure_dir(d)
     return d
 
 def timestamped_model_path() -> str:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return os.path.join(models_dir(), f"model_{ts}.npz")
+    return os.path.join(models_dir(), f"trajectory_player_model_{ts}.npz")
 
 def list_saved_models() -> List[str]:
     d = models_dir()

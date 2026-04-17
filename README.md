@@ -13,12 +13,11 @@
 - Play Joakim predictions (load temp4_with_analysis.json). Original codes are at P119522 - SMILE IV - General\Joakim:
 play_lstm_results.py
 
-- Run MVP simple (still need old data file thanh_object_tracks2) DOES NOT WORK YET :(: 
-tuve_mvp.py
+- Run MVP simple (still need old data file thanh_object_tracks2) DOES NOT WORK YET. tuve_mvp.py
 
 # Quick start
 
-Run `tree -L 2` to make sure that all the data files are correctly placed in your `Data` and `Models` directory:
+Run `tree -L 2` to make sure that all the data files are correctly placed in your `Data`, `JSON-data` and `Models` directories:
 
 ```
 .
@@ -31,8 +30,7 @@ Run `tree -L 2` to make sure that all the data files are correctly placed in you
 │   ├── object_tracks.json
 │   └── predictions.json
 ├── Models
-│   ├── camera_visibility_lookup_table.pkl
-│   └── model_20260416_131406.npz
+│   └── camera_visibility_lookup_table.pkl
 ├── MVP.ipynb
 ├── play_lstm_results.py
 ├── README.md
