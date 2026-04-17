@@ -50,12 +50,16 @@ python trajectory_player.py  --gui
 ```
 python -m ipykernel install --user --name=smile-env --display-name "Python (SMILE-IV)"
 
-jupyter notebook
+jupyter notebook MVP.ipynb
 ```
 
 You can open `JSON-data/analysis.json` after running:
 ```
 python play_lstm_results.py
+```
+
+```
+python tuve_mvp.py
 ```
 
 # Contribute
