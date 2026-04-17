@@ -58,6 +58,12 @@ python -m ipykernel install --user --name=smile-env --display-name "Python (SMIL
 
 jupyter notebook
 ```
+
+You can open `JSON-data/analysis.json` after running:
+```
+python play_lstm_results.py
+```
+
 # Contribute
 
 Before saving and committing your jupyter notebooks, go to the Jupyter menu:
