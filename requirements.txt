@@ -1,0 +1,10 @@
+numpy
+matplotlib
+scikit-learn
+PyQt6
+jupyter
+ipykernel
+opencv-python
+nbstripout
+networkx
+shapely

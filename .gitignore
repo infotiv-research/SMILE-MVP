@@ -1,0 +1,8 @@
+Data
+Models
+JSON-data
+*.json
+.ipynb_checkpoints/
+frames/
+*.mp4
+*.png
