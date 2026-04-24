@@ -15,7 +15,7 @@ Run `tree -L 2` to make sure that all the data files are correctly placed in you
 ```
 .
 ├── Data
-│   ├── (CONFIDENTIAL) Tuve dataset
+│   ├── confidential_tuve_dataset
 │   ├── ood_detections
 │   └── obstacles_and_forklifts
 ├── JSON-data
@@ -83,3 +83,5 @@ install:
 ```
 sudo apt install libxcb-cursor0
 ```
+
+CAUTION! Erik changed name of "(CONFIDENTIAL) Tuve dataset" to "confidential_tuve_dataset" since he thinks blank spaces in paths are annoying.
