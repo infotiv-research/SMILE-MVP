@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib import pyplot as plt
+from undistorter import Undistorter
 
 # ==========================================================
 # CONFIG (unchanged)
@@ -34,6 +35,7 @@ VEHICLE_RADIUS = 20.0
 MAX_DISTANCE = 150.0
 MIN_COSINE = np.cos(np.deg2rad(60))
 OOD_ROOT = "Data/ood_detections/"
+CALIB_INTR_ROOT = "volvo_calib/intr"
 
 # ==========================================================
 # LOAD STATIC DATA
@@ -161,6 +163,21 @@ def get_camera_frame_size(cam_id, frame_name):
     return w, h
 
 
+@lru_cache(maxsize=32)
+def get_undistorter(cam_id, width, height):
+    intr_root = Path(CALIB_INTR_ROOT)
+    candidates = [
+        intr_root / f"{cam_id}_{width}x{height}.yaml",
+        intr_root / f"{cam_id}.yaml",
+    ]
+    for path in candidates:
+        if path.exists():
+            return Undistorter(str(path), new_width=width, new_height=height)
+    raise FileNotFoundError(
+        f"No calibration file found for camera {cam_id} with size {width}x{height} in {intr_root}"
+    )
+
+
 class OODHeatmapStore:
     def __init__(self, dataset_root, ood_root, config):
         self.dataset_root = Path(dataset_root)
@@ -168,6 +185,10 @@ class OODHeatmapStore:
         self.config = config
         self.score_dtype = np.dtype([("id", np.uint64), ("ood_score", np.float32), ("pred", np.uint8)])
         self._score_cache = {}
+
+    def undistorter(self, cam_id, frame_name):
+        width, height = get_camera_frame_size(str(cam_id), frame_name)
+        return get_undistorter(str(cam_id), width, height)
 
     def frame_name(self, cam_id, idx):
         frames = self.config.get(str(cam_id), [])
@@ -210,7 +231,9 @@ class OODHeatmapStore:
             heatmap = squeeze_heatmap(handle[frame_id][()])
 
         width, height = get_camera_frame_size(str(cam_id), frame_name)
-        return cv2.resize(heatmap, (width, height), interpolation=cv2.INTER_LINEAR)
+        distorted = cv2.resize(heatmap, (width, height), interpolation=cv2.INTER_LINEAR)
+        undistorted = self.undistorter(cam_id, frame_name).undistort(distorted.astype(np.float32))
+        return undistorted.astype(np.float32)
 
     def sample(self, cam_id, idx, pixel_xy):
         frame_name = self.frame_name(cam_id, idx)
@@ -239,7 +262,8 @@ class OODHeatmapStore:
         bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
         if bgr is None:
             return None
-        return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        undistorted = self.undistorter(cam_id, frame_name).undistort(bgr)
+        return cv2.cvtColor(undistorted, cv2.COLOR_BGR2RGB)
 
     def overlay_frame(self, cam_id, idx, pixel_xy, alpha=0.45):
         frame_name = self.frame_name(cam_id, idx)
@@ -395,7 +419,7 @@ class CameraOODViewer(FigureCanvasQTAgg):
             overlay = ood_store.overlay_frame(cam_id, idx, pixel_xy)
 
             if overlay is None:
-                ax.set_title(f"Camera {cam_id}: overlay unavailable")
+                ax.set_title(f"cam{cam_id},ood:-", fontsize=9)
                 continue
 
             if pixel_xy is None:
@@ -403,19 +427,12 @@ class CameraOODViewer(FigureCanvasQTAgg):
                 ax.imshow(black)
             else:
                 ax.imshow(overlay["image"])
-            frame_score = overlay["frame_score"]
-            frame_score_txt = f"{frame_score:.3e}" if frame_score is not None else "-"
             pred_txt = int(overlay["pred"]) if overlay["pred"] is not None else "-"
             if cam_id in alert_ood:
                 local_txt = f"{alert_ood[cam_id]['local_score']:.3f}"
-                visibility_txt = "visible"
             else:
                 local_txt = "-"
-                visibility_txt = "not visible"
-            ax.set_title(
-                f"Cam {cam_id} | {visibility_txt}\n"
-                f"local={local_txt} | frame={frame_score_txt} | pred={pred_txt}"
-            )
+            ax.set_title(f"cam{cam_id},ood:{local_txt}", fontsize=9)
 
         self.draw_idle()
 

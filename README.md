@@ -25,6 +25,9 @@ Run `tree -L 2` to make sure that all the data files are correctly placed in you
 │   └── predictions.json
 ├── Models
 │   └── camera_visibility_lookup_table.pkl
+├── volvo_calib
+|   ├── extr
+|   └── intr
 ├── MVP.ipynb
 ├── play_lstm_results.py
 ├── README.md
@@ -71,6 +74,11 @@ or initialize nbstripout in your repo to let git doing that automatically
 ```
 nbstripout --install
 ```
+# Updates
+
+## OOD scoring implemented by Erik
+Based on the robot's position, the OOD score is pulled from every camera that can see the robot (based on the pre-computed bev-to-camera mapping "camera_visibility_lookup_table.pkl"). To view this in live action run  
+python tuve_mvp.py --show-ood-viewer --ood-cameras 160-162
 
 # Issues
 if you get the following error message:
