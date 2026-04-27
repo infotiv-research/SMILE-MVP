@@ -8,3 +8,5 @@ opencv-python
 nbstripout
 networkx
 shapely
+h5py
+hdf5plugin
