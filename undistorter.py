@@ -28,6 +28,10 @@ class Undistorter:
             self.image_shape = cv_file.getNode("image_shape").mat()
             cv_file.release()
 
+        image_shape = np.asarray(self.image_shape).reshape(-1)
+        if image_shape.size < 2:
+            raise ValueError(f"Invalid image_shape: {self.image_shape!r}")
+        self.image_shape = image_shape
 
         self.width = int(self.image_shape[1])
         self.height = int(self.image_shape[0])
