@@ -2,10 +2,10 @@
 
 # How to populate the `Data` and `models` directories
 
-- **Volvo Tuve dataset**: - WP6 - PrototypesDemonstrators (Volvo)\datasets\(CONFIDENTIAL) 
-- **Anomaly detections (Jesper)**: WP6 - PrototypesDemonstrators (Volvo)\datasets\ood_detections
-- Play JSON-data/final.json and display trajectory + maneuver classes (Thanh). Original codes are at P119522 - SMILE IV - General\Volvo Trajectories.
-- Play Joakim predictions (load analysis.json). Original codes are at P119522 - SMILE IV - General\Joakim:
+- **Volvo Tuve dataset**: - `WP6 - PrototypesDemonstrators (Volvo)\datasets\(CONFIDENTIAL)` 
+- **Anomaly detections (Jesper)**: `WP6 - PrototypesDemonstrators (Volvo)\datasets\ood_detections`
+- Play `JSON-data/final.json` and display trajectory + maneuver classes (Thanh). Original codes are at `P119522 - SMILE IV - General\Volvo Trajectories`.
+- Play Joakim predictions (load analysis.json). Original codes are at `P119522 - SMILE IV - General\Joakim`:
 
 
 # Quick start
@@ -36,15 +36,15 @@ Run `tree -L 2` to make sure that all the data files are correctly placed in you
 ├── trajectory_visualizer.py
 └── tuve_mvp.py
 ```
-
-Now create a new virtual environments to install dependencies:
-
+First create a new virtual environments and install dependencies, you only need to do this step **once**. 
 ```
 python -m venv smile-env
-% Activate it on Windows:  smile-env\Scripts\activate
 source smile-env/bin/activate
+# Activate it on Windows:  smile-env\Scripts\activate # To activate
 pip install -r requirements.txt
 ```
+> After doing the previous steps once, you can get into your virtual environment by running `source smile-env/bin/activate`
+
 Run the project:
 
 ```
@@ -65,6 +65,16 @@ python play_lstm_results.py
 python tuve_mvp.py
 ```
 
+# Updates
+
+## OOD scoring implemented by Erik
+Based on the robot's position, the OOD score is pulled from every camera that can see the robot (based on the pre-computed bev-to-camera mapping `camera_visibility_lookup_table.pkl`). To view this in live action run:
+
+```
+python tuve_mvp.py --show-ood-viewer --ood-cameras 160-162
+```
+
+
 # Contribute
 
 Before saving and committing your jupyter notebooks, go to the Jupyter menu:
@@ -74,11 +84,7 @@ or initialize nbstripout in your repo to let git doing that automatically
 ```
 nbstripout --install
 ```
-# Updates
 
-## OOD scoring implemented by Erik
-Based on the robot's position, the OOD score is pulled from every camera that can see the robot (based on the pre-computed bev-to-camera mapping "camera_visibility_lookup_table.pkl"). To view this in live action run  
-python tuve_mvp.py --show-ood-viewer --ood-cameras 160-162
 
 # Issues
 if you get the following error message:
@@ -92,4 +98,4 @@ install:
 sudo apt install libxcb-cursor0
 ```
 
-CAUTION! Erik changed name of "(CONFIDENTIAL) Tuve dataset" to "confidential_tuve_dataset" since he thinks blank spaces in paths are annoying.
+> CAUTION! Erik changed name of "(CONFIDENTIAL) Tuve dataset" to "confidential_tuve_dataset" since he thinks blank spaces in paths are annoying.
