@@ -25,17 +25,21 @@ from undistorter import Undistorter
 # CONFIG (unchanged)
 # ==========================================================
 
-MASK_FOLDER = "Data/confidential_tuve_dataset/bev_res/"
-DATASET_ROOT = "Data/confidential_tuve_dataset"
-SAVE_PATH = "JSON-data/object_tracks.json"
+MASK_FOLDER = "E:/TUVE/bev_res/bev_res" #Note: Copy from Teams
+DATASET_ROOT = "E:/TUVE"
+SAVE_PATH = "JSON-data/object_tracks.json" #Note: it was thanh_object_tracks2.json in Teams MVP
+OOD_ROOT = "E:/TUVE/ood_detections/" #Note: Copy from Teams
+CALIB_INTR_ROOT = "volvo_calib/intr" #Note: available in repo
+CAMERA_LOOKUP_TABLE = "Models/camera_visibility_lookup_table.pkl" 
+DATASET_CONFIG_FILE = "dataset_config.json" #Note: Make sure this file is available in DATASET_ROOT folder
+
 WINDOW_RANGE = (500, 1700)
 HORIZON = 10
 BASE_SPEED = 10.0
 VEHICLE_RADIUS = 20.0
 MAX_DISTANCE = 150.0
 MIN_COSINE = np.cos(np.deg2rad(60))
-OOD_ROOT = "Data/ood_detections/"
-CALIB_INTR_ROOT = "volvo_calib/intr"
+
 
 # ==========================================================
 # LOAD STATIC DATA
@@ -45,10 +49,10 @@ mask_files = sorted(
     f for f in os.listdir(MASK_FOLDER) if f.lower().endswith(".jpg")
 )[WINDOW_RANGE[0] : WINDOW_RANGE[1]]
 
-with open("Models/camera_visibility_lookup_table.pkl", "rb") as f:
+with open(CAMERA_LOOKUP_TABLE, "rb") as f:
     lookup_table = pickle.load(f)
 
-with open(Path(DATASET_ROOT) / "dataset_config.json", "r") as f:
+with open(Path(DATASET_ROOT) /DATASET_CONFIG_FILE, "r") as f:
     dataset_config = json.load(f)
 
 # ==========================================================
@@ -154,13 +158,16 @@ def squeeze_heatmap(arr):
 
 
 @lru_cache(maxsize=64)
-def get_camera_frame_size(cam_id, frame_name):
-    image_path = Path(DATASET_ROOT) / cam_id / frame_name
-    image = cv2.imread(str(image_path))
-    if image is None:
-        raise FileNotFoundError(f"Failed to read camera frame: {image_path}")
-    h, w = image.shape[:2]
-    return w, h
+def get_camera_frame_size(cam_id, frame_name, turbo = True):
+    if turbo:
+        return 640, 360
+    else:
+        image_path = Path(DATASET_ROOT) / cam_id / frame_name
+        image = cv2.imread(str(image_path))
+        if image is None:
+            raise FileNotFoundError(f"Failed to read camera frame: {image_path}")
+        h, w = image.shape[:2]
+        return w, h
 
 
 @lru_cache(maxsize=32)
