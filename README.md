@@ -11,7 +11,8 @@
 # Quick start
 
 Run `tree -L 2` to make sure that all the data files are correctly placed in your `Data`. 
-`Data` directory can be any arbitrary path.
+
+> `Data` directory can be adjusted in `tuve_mvp.py` if you have the data outside the project directory, but **please do not push those changes to the repository**.
 
 ```
 .
@@ -62,6 +63,8 @@ python play_lstm_results.py
 python tuve_mvp.py
 ```
 
+![](resources/dataflow.drawio.png)
+
 # Updates
 
 ## OOD scoring implemented by Erik
@@ -94,5 +97,3 @@ install:
 ```
 sudo apt install libxcb-cursor0
 ```
-
-> CAUTION! Erik changed name of "(CONFIDENTIAL) Tuve dataset" to "confidential_tuve_dataset" since he thinks blank spaces in paths are annoying.
