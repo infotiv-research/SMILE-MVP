@@ -6,3 +6,4 @@ JSON-data
 frames/
 *.mp4
 *.png
+__pycache__/

@@ -1,6 +1,6 @@
 
 
-# How to populate the `Data` and `models` directories
+# How to populate the `Data` and `Models` directories
 
 - **Volvo Tuve dataset**: - `WP6 - PrototypesDemonstrators (Volvo)\datasets\(CONFIDENTIAL)` 
 - **Anomaly detections (Jesper)**: `WP6 - PrototypesDemonstrators (Volvo)\datasets\ood_detections`
@@ -10,31 +10,28 @@
 
 # Quick start
 
-Run `tree -L 2` to make sure that all the data files are correctly placed in your `Data`, `JSON-data` and `Models` directories:
+Run `tree -L 2` to make sure that all the data files are correctly placed in your `Data`. 
+`Data` directory can be any arbitrary path.
 
 ```
 .
 ├── Data
+│   ├── camera_visibility_lookup_table.pkl
 │   ├── confidential_tuve_dataset
-│   ├── ood_detections
-│   └── obstacles_and_forklifts
-├── JSON-data
-│   ├── analysis.json
-│   ├── final.json
-│   ├── object_tracks.json
-│   └── predictions.json
-├── Models
-│   └── camera_visibility_lookup_table.pkl
-├── volvo_calib
-|   ├── extr
-|   └── intr
+│   ├── JSON-data
+│   ├── obstacles_and_forklifts
+│   └── ood_detections
 ├── MVP.ipynb
 ├── play_lstm_results.py
 ├── README.md
 ├── requirements.txt
 ├── trajectory_player.py
 ├── trajectory_visualizer.py
-└── tuve_mvp.py
+├── tuve_mvp.py
+├── undistorter.py
+└── volvo_calib
+    ├── extr
+    └── intr
 ```
 First create a new virtual environments and install dependencies, you only need to do this step **once**. 
 ```
