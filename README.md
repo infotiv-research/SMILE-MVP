@@ -1,6 +1,6 @@
 
 
-# How to populate the `Data` and `Models` directories
+# How to populate the `Data` directory
 
 - **Volvo Tuve dataset**: - `WP6 - PrototypesDemonstrators (Volvo)\datasets\(CONFIDENTIAL)` 
 - **Anomaly detections (Jesper)**: `WP6 - PrototypesDemonstrators (Volvo)\datasets\ood_detections`
