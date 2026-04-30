@@ -25,13 +25,16 @@ from undistorter import Undistorter
 # CONFIG (unchanged)
 # ==========================================================
 
-MASK_FOLDER = "E:/TUVE/bev_res/bev_res" #Note: Copy from Teams
-DATASET_ROOT = "E:/TUVE"
-SAVE_PATH = "JSON-data/object_tracks.json" #Note: it was thanh_object_tracks2.json in Teams MVP
-OOD_ROOT = "E:/TUVE/ood_detections/" #Note: Copy from Teams
-CALIB_INTR_ROOT = "volvo_calib/intr" #Note: available in repo
-CAMERA_LOOKUP_TABLE = "Models/camera_visibility_lookup_table.pkl" 
-DATASET_CONFIG_FILE = "dataset_config.json" #Note: Make sure this file is available in DATASET_ROOT folder
+DATASET_ROOT = "/home/research/repositories/SMILE-MVP/Data/" # or in windows e.g. "E:/TUVE/
+
+MASK_FOLDER =         DATASET_ROOT + "/confidential_tuve_dataset/bev_res"
+DATASET_CONFIG_FILE = DATASET_ROOT + "/confidential_tuve_dataset/dataset_config.json"
+
+OOD_ROOT = DATASET_ROOT + "/ood_detections/"
+CALIB_INTR_ROOT = "volvo_calib/intr"
+CAMERA_LOOKUP_TABLE = DATASET_ROOT + "/camera_visibility_lookup_table.pkl"
+SAVE_PATH = DATASET_ROOT + "/JSON-data/object_tracks.json"
+
 
 WINDOW_RANGE = (500, 1700)
 HORIZON = 10

@@ -1,40 +1,38 @@
 
 
-# How to populate the `Data` and `models` directories
+# How to populate the `Data` and `Models` directories
 
 - **Volvo Tuve dataset**: - `WP6 - PrototypesDemonstrators (Volvo)\datasets\(CONFIDENTIAL)` 
 - **Anomaly detections (Jesper)**: `WP6 - PrototypesDemonstrators (Volvo)\datasets\ood_detections`
-- Play `JSON-data/final.json` and display trajectory + maneuver classes (Thanh). Original codes are at `P119522 - SMILE IV - General\Volvo Trajectories`.
-- Play Joakim predictions (load analysis.json). Original codes are at `P119522 - SMILE IV - General\Joakim`:
+- **Trajectory from Volvo**. Original codes are at `P119522 - SMILE IV - General\Volvo Trajectories`.
+- **Prediction and Classifications**. Original codes are at `P119522 - SMILE IV - General\Joakim`:
 
 
 # Quick start
 
-Run `tree -L 2` to make sure that all the data files are correctly placed in your `Data`, `JSON-data` and `Models` directories:
+Run `tree -L 2` to make sure that all the data files are correctly placed in your `Data`. 
+
+> `Data` directory can be adjusted in `tuve_mvp.py` if you have the data outside the project directory, but **please do not push those changes to the repository**.
 
 ```
 .
 ├── Data
+│   ├── camera_visibility_lookup_table.pkl
 │   ├── confidential_tuve_dataset
-│   ├── ood_detections
-│   └── obstacles_and_forklifts
-├── JSON-data
-│   ├── analysis.json
-│   ├── final.json
-│   ├── object_tracks.json
-│   └── predictions.json
-├── Models
-│   └── camera_visibility_lookup_table.pkl
-├── volvo_calib
-|   ├── extr
-|   └── intr
+│   ├── JSON-data
+│   ├── obstacles_and_forklifts
+│   └── ood_detections
 ├── MVP.ipynb
 ├── play_lstm_results.py
 ├── README.md
 ├── requirements.txt
 ├── trajectory_player.py
 ├── trajectory_visualizer.py
-└── tuve_mvp.py
+├── tuve_mvp.py
+├── undistorter.py
+└── volvo_calib
+    ├── extr
+    └── intr
 ```
 First create a new virtual environments and install dependencies, you only need to do this step **once**. 
 ```
@@ -64,6 +62,8 @@ python play_lstm_results.py
 ```
 python tuve_mvp.py
 ```
+
+![](resources/dataflow.drawio.png)
 
 # Updates
 
@@ -97,5 +97,3 @@ install:
 ```
 sudo apt install libxcb-cursor0
 ```
-
-> CAUTION! Erik changed name of "(CONFIDENTIAL) Tuve dataset" to "confidential_tuve_dataset" since he thinks blank spaces in paths are annoying.

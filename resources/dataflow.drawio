@@ -1,0 +1,130 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/28.2.5 Chrome/138.0.7204.251 Electron/37.6.1 Safari/537.36" version="28.2.5">
+  <diagram name="SMILE-MVP Dataflow" id="Tm76nT33H1qYRxozX0NR">
+    <mxGraphModel dx="2000" dy="1203" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-1" value="INPUTS" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=14;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="60" y="10" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-2" value="SCRIPTS" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=14;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="430" y="10" width="210" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-3" value="OUTPUTS" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=14;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="700" y="10" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-4" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#999999;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="677.5" y="520" width="220" height="197" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-5" value="Legend" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="687.5" y="525" width="100" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-6" value=".json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="692.5" y="555" width="80" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-7" value="JSON file" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="782.5" y="555" width="180" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-8" value=".yaml" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="692.5" y="593" width="80" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-9" value="YAML calibration files" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="782.5" y="593" width="180" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-10" value="img dir" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="692.5" y="631" width="80" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-11" value="Image directory" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="782.5" y="631" width="180" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-12" value=".json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="692.5" y="669" width="80" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-13" value="JSON output" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="782.5" y="669" width="180" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-14" value="tuve_mvp.py&#xa;BEV + OOD Viewer" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#647687;strokeColor=#314354;fontColor=#ffffff;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="430" y="130" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-15" value="dataset_config.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="50" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-16" value="object_tracks.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="100" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-17" value="bev_res/ [img dir]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="150" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-18" value="Data/&lt;cam_id&gt;/ [img dir]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="200" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-19" value="volvo_calib/intr/*.yaml" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="250" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-20" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="ed2-R53sp0XD5Vi4hrRd-15" target="ed2-R53sp0XD5Vi4hrRd-14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-21" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="ed2-R53sp0XD5Vi4hrRd-16" target="ed2-R53sp0XD5Vi4hrRd-14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-22" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="ed2-R53sp0XD5Vi4hrRd-17" target="ed2-R53sp0XD5Vi4hrRd-14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-23" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="ed2-R53sp0XD5Vi4hrRd-18" target="ed2-R53sp0XD5Vi4hrRd-14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-24" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="ed2-R53sp0XD5Vi4hrRd-19" target="ed2-R53sp0XD5Vi4hrRd-14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-25" value="trajectory_player.py&#xa;Trajectory ML + GUI" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#647687;strokeColor=#314354;fontColor=#ffffff;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="430" y="320" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-26" value="JSON-data/final.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="335" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-27" value="predictions.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="720" y="335" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-28" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="ed2-R53sp0XD5Vi4hrRd-26" target="ed2-R53sp0XD5Vi4hrRd-25">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-29" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="ed2-R53sp0XD5Vi4hrRd-25" target="ed2-R53sp0XD5Vi4hrRd-27">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-30" value="play_lstm_results.py&#xa;LSTM Replay Viewer" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#647687;strokeColor=#314354;fontColor=#ffffff;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="430" y="410" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-31" value="JSON-data/analysis.json&#xa;{&quot;data&quot;: [...], &quot;analysis&quot;: {...}}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="420" width="200" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-32" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="ed2-R53sp0XD5Vi4hrRd-31" target="ed2-R53sp0XD5Vi4hrRd-30">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-33" value="trajectory_visualizer.py&#xa;Tracking Visualization" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#647687;strokeColor=#314354;fontColor=#ffffff;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="430" y="530" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-34" value="tracking.json (any)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="525" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-35" value="background image [img, optional]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="575" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-36" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="ed2-R53sp0XD5Vi4hrRd-34" target="ed2-R53sp0XD5Vi4hrRd-33">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-37" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;" edge="1" parent="1" source="ed2-R53sp0XD5Vi4hrRd-35" target="ed2-R53sp0XD5Vi4hrRd-33">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-38" value="MVP.ipynb&#xa;Path Planning Notebook" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#f0a30a;strokeColor=#BD7000;fontColor=#000000;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="430" y="653" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-39" value="obstacles_and_forklifts/ [img dir]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="665" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="ed2-R53sp0XD5Vi4hrRd-40" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="ed2-R53sp0XD5Vi4hrRd-39" target="ed2-R53sp0XD5Vi4hrRd-38">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
