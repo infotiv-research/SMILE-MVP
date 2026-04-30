@@ -29,7 +29,7 @@ DATASET_ROOT = "/home/research/repositories/SMILE-MVP/Data/" # or in windows e.g
 
 MASK_FOLDER =         DATASET_ROOT + "/confidential_tuve_dataset/bev_res"
 DATASET_CONFIG_FILE = DATASET_ROOT + "/confidential_tuve_dataset/dataset_config.json"
-
+CAMERA_FOLDER =         DATASET_ROOT + "/confidential_tuve_dataset/"
 OOD_ROOT = DATASET_ROOT + "/ood_detections/"
 CALIB_INTR_ROOT = "volvo_calib/intr"
 CAMERA_LOOKUP_TABLE = DATASET_ROOT + "/camera_visibility_lookup_table.pkl"
@@ -190,7 +190,7 @@ def get_undistorter(cam_id, width, height):
 
 class OODHeatmapStore:
     def __init__(self, dataset_root, ood_root, config):
-        self.dataset_root = Path(dataset_root)
+        self.camera_root = Path(dataset_root)
         self.ood_root = Path(ood_root)
         self.config = config
         self.score_dtype = np.dtype([("id", np.uint64), ("ood_score", np.float32), ("pred", np.uint8)])
@@ -264,11 +264,11 @@ class OODHeatmapStore:
             "pred": frame_score[1] if frame_score else None,
         }
 
-    @lru_cache(maxsize=128)
     def rgb_frame(self, cam_id, frame_name):
         if not frame_name:
             return None
-        image_path = self.dataset_root / str(cam_id) / frame_name
+        image_path = self.camera_root / str(cam_id) / frame_name
+        print("Loading image:", image_path)
         bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
         if bgr is None:
             return None
@@ -327,7 +327,7 @@ tracks, uncertainties, data_mode = load_tracks_auto(SAVE_PATH)
 mask0 = cv2.imread(os.path.join(MASK_FOLDER, mask_files[0]), cv2.IMREAD_GRAYSCALE)
 H, W = mask0.shape
 NUM_FRAMES = min(len(tracks), len(mask_files))
-ood_store = OODHeatmapStore(DATASET_ROOT, OOD_ROOT, dataset_config)
+ood_store = OODHeatmapStore(CAMERA_FOLDER, OOD_ROOT, dataset_config)
 
 # ==========================================================
 # VIEWER
