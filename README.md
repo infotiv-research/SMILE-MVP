@@ -4,8 +4,8 @@
 
 - **Volvo Tuve dataset**: - `WP6 - PrototypesDemonstrators (Volvo)\datasets\(CONFIDENTIAL)` 
 - **Anomaly detections (Jesper)**: `WP6 - PrototypesDemonstrators (Volvo)\datasets\ood_detections`
-- Play `JSON-data/final.json` and display trajectory + maneuver classes (Thanh). Original codes are at `P119522 - SMILE IV - General\Volvo Trajectories`.
-- Play Joakim predictions (load analysis.json). Original codes are at `P119522 - SMILE IV - General\Joakim`:
+- **Trajectory from Volvo**. Original codes are at `P119522 - SMILE IV - General\Volvo Trajectories`.
+- **Prediction and Classifications**. Original codes are at `P119522 - SMILE IV - General\Joakim`:
 
 
 # Quick start
