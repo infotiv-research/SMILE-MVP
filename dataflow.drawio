@@ -1,0 +1,191 @@
+<mxfile host="app.diagrams.net" modified="2026-04-30" agent="claude-code" version="21.0.0" type="device">
+  <diagram name="SMILE-MVP Dataflow" id="smile-mvp-dataflow">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ══════════════════════════════════════════ -->
+        <!-- COLUMN HEADERS                            -->
+        <!-- ══════════════════════════════════════════ -->
+        <mxCell id="hdr_in" value="INPUTS" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=14;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="60" y="10" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="hdr_sc" value="SCRIPTS" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=14;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="430" y="10" width="210" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="hdr_out" value="OUTPUTS" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=14;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="790" y="10" width="200" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ══════════════════════════════════════════ -->
+        <!-- LEGEND                                    -->
+        <!-- ══════════════════════════════════════════ -->
+        <mxCell id="leg_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#999999;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="795" y="560" width="300" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_title" value="Legend" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="805" y="565" width="100" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_json" value=".json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="810" y="595" width="80" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_json_lbl" value="JSON file" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="900" y="595" width="180" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_yaml" value=".yaml" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="810" y="633" width="80" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_yaml_lbl" value="YAML calibration files" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="900" y="633" width="180" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_img" value="img dir" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="810" y="671" width="80" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_img_lbl" value="Image directory" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="900" y="671" width="180" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_out" value=".json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="810" y="709" width="80" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="leg_out_lbl" value="JSON output" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="900" y="709" width="180" height="28" as="geometry" />
+        </mxCell>
+
+        <!-- ══════════════════════════════════════════ -->
+        <!-- GROUP 1: tuve_mvp.py                      -->
+        <!-- ══════════════════════════════════════════ -->
+
+        <!-- Script -->
+        <mxCell id="s_tuve" value="tuve_mvp.py&#xa;BEV + OOD Viewer" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#647687;strokeColor=#314354;fontColor=#ffffff;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="430" y="130" width="210" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Inputs -->
+        <mxCell id="i_cfg" value="dataset_config.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="50" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="i_tracks" value="object_tracks.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="100" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="i_bev" value="bev_res/ [img dir]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="150" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="i_cam" value="Data/&lt;cam_id&gt;/ [img dir]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="200" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="i_yaml" value="volvo_calib/intr/*.yaml" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="250" width="200" height="35" as="geometry" />
+        </mxCell>
+
+        <!-- Edges for tuve_mvp.py -->
+        <mxCell id="e1" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" source="i_cfg" target="s_tuve" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" source="i_tracks" target="s_tuve" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" source="i_bev" target="s_tuve" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" source="i_cam" target="s_tuve" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" source="i_yaml" target="s_tuve" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ══════════════════════════════════════════ -->
+        <!-- GROUP 2: trajectory_player.py             -->
+        <!-- ══════════════════════════════════════════ -->
+
+        <!-- Script -->
+        <mxCell id="s_traj" value="trajectory_player.py&#xa;Trajectory ML + GUI" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#647687;strokeColor=#314354;fontColor=#ffffff;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="430" y="380" width="210" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Input -->
+        <mxCell id="i_final" value="JSON-data/final.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="395" width="200" height="35" as="geometry" />
+        </mxCell>
+
+        <!-- Output -->
+        <mxCell id="o_pred" value="predictions.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="795" y="395" width="200" height="35" as="geometry" />
+        </mxCell>
+
+        <!-- Edges for trajectory_player.py -->
+        <mxCell id="e6" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" source="i_final" target="s_traj" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" source="s_traj" target="o_pred" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ══════════════════════════════════════════ -->
+        <!-- GROUP 3: play_lstm_results.py             -->
+        <!-- ══════════════════════════════════════════ -->
+
+        <!-- Script -->
+        <mxCell id="s_lstm" value="play_lstm_results.py&#xa;LSTM Replay Viewer" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#647687;strokeColor=#314354;fontColor=#ffffff;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="430" y="530" width="210" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Input -->
+        <mxCell id="i_analysis" value="JSON-data/analysis.json&#xa;{&quot;data&quot;: [...], &quot;analysis&quot;: {...}}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="540" width="200" height="45" as="geometry" />
+        </mxCell>
+
+        <!-- Edge -->
+        <mxCell id="e8" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" source="i_analysis" target="s_lstm" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ══════════════════════════════════════════ -->
+        <!-- GROUP 4: trajectory_visualizer.py         -->
+        <!-- ══════════════════════════════════════════ -->
+
+        <!-- Script -->
+        <mxCell id="s_viz" value="trajectory_visualizer.py&#xa;Tracking Visualization" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#647687;strokeColor=#314354;fontColor=#ffffff;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="430" y="680" width="210" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Inputs -->
+        <mxCell id="i_json_vis" value="tracking.json (any)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="675" width="200" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="i_img_vis" value="background image [img, optional]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="725" width="200" height="35" as="geometry" />
+        </mxCell>
+
+        <!-- Edges -->
+        <mxCell id="e9" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" source="i_json_vis" target="s_viz" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;" edge="1" source="i_img_vis" target="s_viz" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ══════════════════════════════════════════ -->
+        <!-- GROUP 5: MVP.ipynb                        -->
+        <!-- ══════════════════════════════════════════ -->
+
+        <!-- Script (notebook style) -->
+        <mxCell id="s_nb" value="MVP.ipynb&#xa;Path Planning Notebook" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#f0a30a;strokeColor=#BD7000;fontColor=#000000;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="430" y="840" width="210" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Input -->
+        <mxCell id="i_obs" value="obstacles_and_forklifts/ [img dir]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="852" width="200" height="35" as="geometry" />
+        </mxCell>
+
+        <!-- Edge -->
+        <mxCell id="e11" value="" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" source="i_obs" target="s_nb" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
