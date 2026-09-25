@@ -1,0 +1,32 @@
+{
+  "paths": {
+    "dataset_root": "E:/TUVE",
+    "mask_folder": "bev_img/bev_img",
+    "dataset_config_file": "dataset_config.json",
+    "camera_folder": "",
+    "ood_root": "ood_detections",
+    "calib_intr_root": "volvo_calib/intr",
+    "camera_lookup_table": "camera_visibility_lookup_table.pkl",
+    "save_path": "JSON-data/2026_02_27_final.json"
+  },
+  "runtime": {
+    "window_range": [0, 33000],
+    "horizon": 10,
+    "base_speed": 10.0,
+    "vehicle_radius": 20.0,
+    "max_distance": 150.0,
+	"track_stride": 3,
+    "min_cosine_deg": 60
+  },
+  "ui": {
+    "timer_interval_ms": 100,
+    "default_window_width": 1528,
+    "wide_window_width": 1528,
+    "window_height": 470
+  },
+  "camera": {
+    "turbo_frame_size": true,
+    "default_width": 640,
+    "default_height": 360
+  }
+}
