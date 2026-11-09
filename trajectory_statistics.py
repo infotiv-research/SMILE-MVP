@@ -2,7 +2,7 @@
 """Generate trajectory-only statistics and figures from one selected JSON source.
 
 Segmentation images are not read or required. The default source is the native
-tracker export ``final.json``. Use --use-object-tracks for the distinct legacy
+tracker export ``trajectories_2026_02_27.json``. Use --use-object-tracks for the distinct legacy
 BEV export. Outputs are always placed in a source-labelled directory.
 """
 from __future__ import annotations
@@ -246,7 +246,7 @@ def plot_metric_motion(rows: list[dict], output: Path, source: str) -> dict:
     style_metric_map(ax, "Twenty longest trajectories in world space")
     ax.legend(loc="center left", bbox_to_anchor=(1, .5), fontsize=7)
     save_metric_figure(fig, output / "metric_representative_trajectories")
-    metric_source = "position_3d and velocity_3d in final.json" if source == "final" else "exact calibrated MVP BEV grid conversion"
+    metric_source = "position_3d and velocity_3d in trajectories_2026_02_27.json" if source == "final" else "exact calibrated MVP BEV grid conversion"
     return {"metric_motion_source": metric_source, "observations": len(rows),
             "speed_mps": quantiles(speed[valid_motion]), "speed_color_cap_p95_mps": p95,
             "centred_oriented_boxes": box_count}
@@ -254,10 +254,10 @@ def plot_metric_motion(rows: list[dict], output: Path, source: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--final-data", type=Path, default=Path("JSON-data/final.json"),
+    parser.add_argument("--final-data", type=Path, default=Path("JSON-data/trajectories_2026_02_27.json"),
                         help="Current tracker export; used by default for every statistic and plot.")
     parser.add_argument("--use-object-tracks", action="store_true",
-                        help="Use only the legacy JSON-data/object_tracks.json BEV export instead of final.json.")
+                        help="Use only the legacy JSON-data/object_tracks.json BEV export instead of trajectories_2026_02_27.json.")
     parser.add_argument("--output", type=Path,
                         help="Base output directory. The source suffix (_final or _object_tracks) is always added.")
     parser.add_argument("--no-metric-plots", action="store_true", help="Do not create world-space metric figures.")

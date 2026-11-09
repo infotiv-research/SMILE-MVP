@@ -1,9 +1,13 @@
-Data
-Models
-JSON-data
-*.json
 .ipynb_checkpoints/
 frames/
 *.mp4
 *.png
+*.jpeg
+*.jpg
+*.h5
+*.npz
+*.pkl
 __pycache__/
+
+# Too large for GitHub (>100 MB); keep locally only
+JSON-data/trajectories_2026_02_27.json

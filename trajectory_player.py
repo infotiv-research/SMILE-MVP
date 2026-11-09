@@ -1625,7 +1625,7 @@ def run_gui(trajs: Dict[int,np.ndarray], model: Optional[MLModel], online: Optio
 # ===== Main (CLI) =====
 def main():
     parser = argparse.ArgumentParser(description="Trajectory ML + Micro Maneuvers + GUI (frame-aware)")
-    parser.add_argument("--data", type=str, default="JSON-data/final.json", help="Path to trajectories JSON")    
+    parser.add_argument("--data", type=str, default="JSON-data/trajectories_2026_02_27.json", help="Path to trajectories JSON")
     parser.add_argument("--entries", type=int, default=5, help="K (entry areas)")
     parser.add_argument("--codebook", type=int, default=16, help="K (step codebook)")
     parser.add_argument("--pca", type=int, default=6, help="PCA components for shape")

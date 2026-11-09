@@ -12,21 +12,33 @@
 
 Run `tree -L 2` to make sure that all the data files are correctly placed in your `Data`. 
 
-> `Data` directory can be adjusted in `tuve_mvp.py` if you have the data outside the project directory, but **please do not push those changes to the repository**.
+> The location of the dataset is set by `paths.dataset_root` in `mvp-config.json` (default: `Data`). If your data is outside the project, change that value, but **please do not push that change to the repository**.
 
 ```
 .
 ├── Data
+│   ├── 160 ... 171                      camera frames (one folder per camera)
+│   ├── bev_img/bev_img                  BEV masks used by tuve_mvp.py
+│   ├── bev_res/bev_res                  BEV masks used by tuve_mvp_2026_04_16.py
 │   ├── camera_visibility_lookup_table.pkl
-│   ├── confidential_tuve_dataset
-│   ├── JSON-data
-│   ├── obstacles_and_forklifts
-│   └── ood_detections
+│   ├── dataset_config.json
+│   ├── obstacles_and_forklifts          prediction data (forklifts, obstacles)
+│   ├── occupancy_projection.pkl
+│   ├── volvo_coordinate_mapping.pkl
+│   └── ood_detections/<cam>/            per-camera OOD scores and heatmaps
+├── JSON-data                            trajectory, prediction and robot-path JSON files
+│   ├── trajectories_2026_02_27.json
+│   ├── predictions_2026_02_27.json
+│   └── robot_paths.json
+├── Models                               saved trajectory models (written by trajectory_player.py)
 ├── MVP.ipynb
+├── mvp-config.json
 ├── play_lstm_results.py
 ├── README.md
 ├── requirements.txt
+├── tuve_mvp_2026_04_16.py                   Tuve viewer, 2026-04-16 (paths read from mvp-config.json)
 ├── trajectory_player.py
+├── trajectory_statistics.py
 ├── trajectory_visualizer.py
 ├── tuve_mvp.py
 ├── undistorter.py
@@ -34,6 +46,21 @@ Run `tree -L 2` to make sure that all the data files are correctly placed in you
     ├── extr
     └── intr
 ```
+
+`Data/`, `JSON-data/` and `Models/` hold large data files and must not be committed. `.gitignore` excludes `*.npz`, `*.pkl`, `*.h5`, `*.png` and the large `JSON-data/trajectories_2026_02_27.json`, but not everything in these folders, so check `git status` before every commit. Camera `168` has no frames in the dataset.
+
+# Local-only model and calibration files
+
+These files are git-ignored and must be copied in separately. They are listed here so you know what they are.
+
+**`Models/`** (saved trajectory models, `.npz`):
+- `trajectory_player_model_<timestamp>.npz`: written by `trajectory_player.py` every time it trains (`--demo`, `--gui`). The timestamp is the training time, so each run creates a new file.
+- `model_20260416_131406.npz`: produced on 2026-04-16. Its creating script is not recorded.
+
+**`Data/`** (`.pkl` calibration and lookup tables):
+- `occupancy_projection.pkl`: camera projection (`P`, `K`, `R`, `t`) used by `tuve_mvp_2026_04_16.py` to project the occupancy map.
+- `camera_visibility_lookup_table.pkl`: BEV-to-camera visibility lookup used for OOD scoring (see *OOD scoring* below).
+- `volvo_coordinate_mapping.pkl`: not referenced by any script in this repo. Its purpose is not documented.
 First create a new virtual environments and install dependencies, you only need to do this step **once**. 
 ```
 python -m venv smile-env
@@ -61,6 +88,11 @@ python play_lstm_results.py
 
 ```
 python tuve_mvp.py
+```
+
+Tuve viewer from 2026-04-16 (reads its paths from `mvp-config.json`, run from the repo root):
+```
+python tuve_mvp_2026_04_16.py
 ```
 
 ![](resources/dataflow.drawio.png)
