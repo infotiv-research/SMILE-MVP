@@ -95,6 +95,28 @@ Tuve viewer from 2026-04-16 (reads its paths from `mvp-config.json`, run from th
 python tuve_mvp_2026_04_16.py
 ```
 
+# Demo
+
+Two short demo videos show the MVPs in use. Run them from the repo root.
+
+**Trajectory player** (`trajectory_player.py`)
+
+1. Start the viewer with `python trajectory_player.py --gui`.
+2. Step through the frames with the controls at the bottom, or drag the *Position* slider.
+3. Pick an object with the *Object* selector to see its route probabilities and maneuver (moving, loading, stationary).
+4. Adjust the *Maneuvers Tuning* sliders to change how sensitive the maneuver detection is.
+
+[![Trajectory player demo](https://img.youtube.com/vi/ebqgq2yV7IE/hqdefault.jpg)](https://youtu.be/ebqgq2yV7IE)
+
+**Tuve viewer** (`tuve_mvp_2026_04_16.py`)
+
+1. Start the viewer with `python tuve_mvp_2026_04_16.py`.
+2. Use the frame slider to move through the recording.
+3. Choose the AMR path and the active forklift in the side panel.
+4. Read the decision (GO or YIELD), time-to-collision, trust, and camera OOD score for the selected forklift.
+
+[![Tuve viewer demo](https://img.youtube.com/vi/w72y5S-MajQ/hqdefault.jpg)](https://youtu.be/w72y5S-MajQ)
+
 ![](resources/dataflow.drawio.png)
 
 # Updates
