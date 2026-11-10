@@ -2114,6 +2114,17 @@ class MVPViewer(FigureCanvasQTAgg):
                 int(self.active_track_id)
             )
         )
+        if pred:
+
+            if (
+                pred.get("track_id")
+                != self.active_track_id
+            ):
+                print(
+                    "[WARN] TRACK MISMATCH",
+                    pred.get("track_id"),
+                    self.active_track_id
+                )        
 
         if pred is None:
             return
@@ -2136,10 +2147,18 @@ class MVPViewer(FigureCanvasQTAgg):
 
         mode_name = pred.get("mode")
 
-        if mode_name is not None:
-            self.mode_history.append(
-                str(mode_name)
-            )
+        if (
+            mode_name is not None
+            and mode_name != ""
+        ):
+
+            if (
+                not self.mode_history
+                or self.mode_history[-1] != mode_name
+            ):
+                self.mode_history.append(
+                    str(mode_name)
+                )
 
         self.compute_prediction_consistency()
 
@@ -2587,7 +2606,14 @@ class MainWindow(QMainWindow):
     def change_object(self, txt):
 
         try:
-            self.viewer.active_track_id = int(txt)
+            new_tid = int(txt)
+
+            if new_tid != self.viewer.active_track_id:
+
+                self.viewer.route_history.clear()
+                self.viewer.mode_history.clear()
+
+            self.viewer.active_track_id = new_tid
 
         except ValueError:
             return
@@ -2732,24 +2758,41 @@ class MainWindow(QMainWindow):
         )
 
         if route:
+            display_label = (
+                v.mode_info.get("display_label")
+                if v.mode_info
+                else None
+            )
+            if display_label:
 
-            self.label_route.setText(
-                f"Route : {route.get('from','?')} → {route.get('to','?')}"
+                self.label_route.setText(
+                    f"Route : {display_label}"
+                )
+            else:
+                self.label_route.setText(
+                    f"Route : "
+                    f"{route.get('from','?')} → "
+                    f"{route.get('to','?')}"
+                )
+
+            conf = mode.get(
+                "display_confidence"
             )
 
-            prob = route.get("prob")
+            if conf is not None:
 
-            if prob is not None:
+                self.label_route_prob.setText(
+                    f"Display Conf : {conf:.2f}"
+                )
+
+            else:
+
+                prob = route.get("prob")
 
                 self.label_route_prob.setText(
                     f"Route Prob : {prob:.2f}"
                 )
 
-            else:
-
-                self.label_route_prob.setText(
-                    "Route Prob : N/A"
-                )
 
             unc = route.get("uncertainty")
 
