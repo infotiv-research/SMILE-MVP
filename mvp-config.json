@@ -33,6 +33,7 @@
     "mask_folder": "bev_res/bev_res",
     "predictions": "../JSON-data/predictions_2026_02_27.json",
     "occupancy_projection": "occupancy_projection.pkl",
-    "robot_paths": "../JSON-data/robot_paths.json"
+    "robot_paths": "../JSON-data/robot_paths.json",
+	"model_path": "./Models/model_20261110_164647.npz"	
   }
 }
