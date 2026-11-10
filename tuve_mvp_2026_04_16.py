@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Tuple
 from shapely.geometry import Point, Polygon
 import joblib
+import numpy as np
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
@@ -17,17 +20,27 @@ from PyQt6.QtWidgets import (
     QPushButton, QSlider, QLabel,
     QFileDialog, QComboBox
 )
+from collections import deque
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Ellipse
+from trajectory_player_v6_20261109 import MLModel  
+from safety_framework import (
+    SceneContext,
+    Supervisor,
+    SupervisorManager,
+    SupervisorResult,
+    BBoxUncertaintySupervisor,
+    TrajectoryUncertaintySupervisor,
+    RouteUncertaintySupervisor,
+    ManeuverUncertaintySupervisor,
+    DecisionEngine
+)
 
 # ==========================================================
-# CONFIG (unchanged)
+# CONFIG
 # ==========================================================
-
-# Paths and runtime values come from mvp-config.json
-# (run this script from the repository root)
 CONFIG_FILE = "mvp-config.json"
 
 with open(CONFIG_FILE, "r") as _f:
@@ -40,14 +53,30 @@ MASK_FOLDER = str(DATA_ROOT / EXTRA_PATHS["mask_folder"])
 SAVE_PATH = str(DATA_ROOT / CFG["paths"]["save_path"])
 PRED_PATH = str(DATA_ROOT / EXTRA_PATHS["predictions"])
 OOD_ROOT = str(DATA_ROOT / CFG["paths"]["ood_root"])
-CAMERA_LOOKUP_PATH = str(DATA_ROOT / CFG["paths"]["camera_lookup_table"])
-OCCUPANCY_PATH = str(DATA_ROOT / EXTRA_PATHS["occupancy_projection"])
-PATH_DB = str(DATA_ROOT / EXTRA_PATHS["robot_paths"])
+
+CAMERA_LOOKUP_PATH = str(
+    DATA_ROOT / CFG["paths"]["camera_lookup_table"]
+)
+
+OCCUPANCY_PATH = str(
+    DATA_ROOT / EXTRA_PATHS["occupancy_projection"]
+)
+
+PATH_DB = str(
+    DATA_ROOT / EXTRA_PATHS["robot_paths"]
+)
+
+MODEL_PATH = str(
+    EXTRA_PATHS["model_path"]
+)
 
 VEHICLE_RADIUS = CFG["runtime"]["vehicle_radius"]
 MAX_DISTANCE = CFG["runtime"]["max_distance"]
 
 OOD_CACHE = {}
+
+MODEL = MLModel.load(MODEL_PATH)
+ENTRY_ELLIPSES = MODEL.entry_ellipses
 
 # ==========================================================
 # LOAD STATIC DATA
@@ -78,6 +107,7 @@ P = np.asarray(occ_proj["P"], dtype=np.float64)
 K = np.asarray(occ_proj["K"], dtype=np.float64)
 R = np.asarray(occ_proj["R"], dtype=np.float64)
 t = np.asarray(occ_proj["t"], dtype=np.float64).reshape(3, 1)
+
 
 # ==========================================================
 # DATA ADAPTORS 
@@ -131,26 +161,19 @@ def adapt_2026_format(frames):
             if angle is None:
                 angle = heading_from_velocity(vx, vy)
 
+            poly = obj.get("associated_polygon", [])
+
             frame_objects.append({
                 "track_id": track_id,
                 "timestamp": timestamp,
 
                 "center_world": [x, y],
-
                 "velocity_world": [vx, vy],
 
-                # NOTE:
-                # width/length are occupancy pixel dimensions,
-                # not world dimensions
-                "size_px": [
-                    width,
-                    length
-                ],
+                "bbox_width": float(width),
+                "bbox_length": float(length),
 
-                "polygon": obj.get(
-                    "associated_polygon",
-                    []
-                ),
+                "polygon": poly,
 
                 "angle": float(angle)
             })
@@ -162,9 +185,117 @@ def adapt_2026_format(frames):
 
     return tracks
 
+def estimate_track_uncertainty(
+    frame_idx,
+    track_id
+):
+
+    hist = TRACK_UNCERTAINTY.get(
+        track_id,
+        []
+    )
+
+    if len(hist) < 4:
+        return 0.0
+
+    indexed = TRACK_HISTORY.get(
+        track_id,
+        []
+    )
+
+    current_idx = None
+
+    for i, h in enumerate(indexed):
+
+        if h[0] == frame_idx:
+
+            current_idx = i
+            break
+
+    if current_idx is None:
+        return 1.0
+
+    start = max(
+        0,
+        current_idx - 4
+    )
+
+    end = current_idx + 1
+
+    recent = hist[start:end]
+
+    if len(recent) < 3:
+        return 0.0
+
+    centers = np.asarray([
+        h["center"]
+        for h in recent
+    ])
+
+    areas = np.asarray([
+        h["area"]
+        for h in recent
+    ])
+
+    pos_var = np.linalg.norm(
+        np.std(
+            centers,
+            axis=0
+        )
+    )
+
+    area_cv = (
+        np.std(areas)
+        /
+        (
+            np.mean(areas)
+            + 1e-6
+        )
+    )
+
+    unc = (
+        0.7 *
+        min(
+            1.0,
+            pos_var / 15.0
+        )
+        +
+        0.3 *
+        min(
+            1.0,
+            area_cv
+        )
+    )
+
+    return float(
+        np.clip(
+            unc,
+            0.0,
+            1.0
+        )
+    )
 # ==========================================================
-# HELPERS (unchanged logic)
+# HELPERS 
 # ==========================================================
+
+
+def world_to_occupancy(wx, wy):
+
+    # assumption A:
+    X = np.array([
+        [wx],
+        [wy],
+        [0.0],
+        [1.0]
+    ], dtype=np.float64)
+
+    uvw = P @ X
+    uvw = uvw.ravel()
+
+    u = uvw[0] / uvw[2]
+    v = uvw[1] / uvw[2]
+
+    return float(u), float(v)
 
 def heading_from_velocity(vx, vy):
 
@@ -230,6 +361,47 @@ def load_ood(cam_id):
 
 tracks, uncertainties, data_mode = load_tracks_auto(SAVE_PATH)
 
+# ==========================================================
+# TRACK UNCERTAINTY HISTORY
+# ==========================================================
+
+TRACK_UNCERTAINTY = {}
+
+for frame in tracks:
+
+    for obj in frame["objects"]:
+
+        tid = obj["track_id"]
+
+        poly = np.asarray(
+            obj["polygon"],
+            dtype=np.float32
+        )
+
+        if len(poly) < 3:
+            continue
+
+        center = np.mean(
+            poly,
+            axis=0
+        )
+
+        area = cv2.contourArea(
+            poly.astype(np.float32)
+        )
+
+        TRACK_UNCERTAINTY.setdefault(
+            tid,
+            []
+        ).append({
+
+            "center": center,
+
+            "area": area,
+
+            "frame": frame["timestamp"]
+        })
+
 first_ts = tracks[0]["timestamp"]
 mask_file = mask_lookup.get(first_ts)
 
@@ -280,22 +452,11 @@ TRACK_HISTORY = {}
 for frame_idx, frame in enumerate(tracks):
 
     for obj in frame["objects"]:
-
         tid = obj["track_id"]
-
-        pts = np.asarray(
-            obj["polygon"]
-        )
-
-        if len(pts) < 3:
-            continue
-
-        cx = float(
-            np.mean(pts[:, 0])
-        )
-
-        cy = float(
-            np.mean(pts[:, 1])
+        wx, wy = obj["center_world"]
+        cx, cy = world_to_occupancy(
+            wx,
+            wy
         )
 
         TRACK_HISTORY.setdefault(
@@ -310,10 +471,10 @@ for frame_idx, frame in enumerate(tracks):
         )
 
 # ==========================================================
-# TRACK UNCERTAINTY HISTORY
+# BBOX UNCERTAINTY MODEL
 # ==========================================================
 
-TRACK_UNCERTAINTY = {}
+TRACK_BBOX_STATS = {}
 
 for frame in tracks:
 
@@ -323,84 +484,322 @@ for frame in tracks:
 
         poly = np.asarray(
             obj["polygon"],
-            dtype=np.float32
+            dtype=float
         )
 
         if len(poly) < 3:
             continue
 
-        center = np.mean(poly, axis=0)
+        bw = float(obj["bbox_width"])
+        bl = float(obj["bbox_length"])
 
-        area = cv2.contourArea(
-            poly.astype(np.float32)
+        ang = np.deg2rad(
+            obj["angle"]
         )
 
-        TRACK_UNCERTAINTY.setdefault(
+        center = poly.mean(axis=0)
+
+        R = np.array([
+            [ np.cos(ang), np.sin(ang)],
+            [-np.sin(ang), np.cos(ang)]
+        ])
+
+        local = (
+            poly - center
+        ) @ R.T
+
+        poly_length = (
+            local[:,0].max()
+            - local[:,0].min()
+        )
+
+        poly_width = (
+            local[:,1].max()
+            - local[:,1].min()
+        )
+
+        dl = max(
+            0.0,
+            poly_length - bl
+        )
+
+        dw = max(
+            0.0,
+            poly_width - bw
+        )
+
+        TRACK_BBOX_STATS.setdefault(
             tid,
             []
-        ).append({
-
-            "center":
-                center,
-
-            "area":
-                area,
-
-            "frame":
-                frame["timestamp"]
-        })
-
-# ==========================================================
-# AUTO BUILD ENTRY POINTS FROM ROUTE PREDICTIONS
-# ==========================================================
-
-ENTRY_SAMPLES = {}
-
-for timestamp, pred_frame in prediction_lookup.items():
-
-    for tid, pred in pred_frame.items():
-
-        route = pred.get("route")
-
-        if not route:
-            continue
-
-        entry_id = route.get("from")
-
-        if entry_id is None:
-            continue
-
-        hist = TRACK_HISTORY.get(
-            int(tid),
-            []
-        )
-
-        if not hist:
-            continue
-
-        first_pt = hist[0]
-
-        ENTRY_SAMPLES.setdefault(
-            entry_id,
-            []
         ).append(
-            (
-                first_pt[1],
-                first_pt[2]
-            )
+            (dl, dw)
         )
 
-ENTRY_POINTS = {}
+def uncertainty_bbox(track_id):
 
-for entry_id, pts in ENTRY_SAMPLES.items():
-
-    pts = np.asarray(pts)
-
-    ENTRY_POINTS[entry_id] = (
-        float(np.mean(pts[:, 0])),
-        float(np.mean(pts[:, 1]))
+    stats = TRACK_BBOX_STATS.get(
+        track_id
     )
 
+    if not stats:
+        return (0.0, 0.0)
+
+    arr = np.asarray(
+        stats,
+        dtype=float
+    )
+
+    expand_l = np.percentile(
+        arr[:, 0],
+        95
+    )
+
+    expand_w = np.percentile(
+        arr[:, 1],
+        95
+    )
+
+    return (
+        float(expand_l),
+        float(expand_w)
+    )
+
+TRACK_BBOX_MODEL = {}
+
+for tid, samples in TRACK_BBOX_STATS.items():
+
+    arr = np.asarray(
+        samples,
+        dtype=float
+    )
+
+    if len(arr) < 5:
+        continue
+
+    TRACK_BBOX_MODEL[tid] = {
+
+        "mean":
+            arr.mean(0),
+
+        "cov":
+            np.cov(arr.T)
+    }
+
+def estimate_bbox_uncertainty(
+    track_id
+):
+
+    model = (
+        TRACK_BBOX_MODEL.get(
+            track_id
+        )
+    )
+
+    if model is None:
+        return 0.0
+
+    eigvals = np.linalg.eigvalsh(
+        model["cov"]
+    )
+
+    raw = np.sqrt(
+        eigvals.max()
+    )
+
+    return float(
+        np.clip(
+            raw / 2.0,
+            0.0,
+            1.0
+        )
+    )
+
+def estimate_trajectory_uncertainty(
+    track_id
+):
+
+    hist = TRACK_HISTORY.get(
+        track_id,
+        []
+    )
+
+    if len(hist) < 6:
+        return 0.0
+
+    pts = np.asarray([
+
+        (h[1], h[2])
+
+        for h in hist[-10:]
+    ])
+
+    vel = np.diff(
+        pts,
+        axis=0
+    )
+
+    if len(vel) < 2:
+        return 0.0
+
+    headings = np.arctan2(
+        vel[:,1],
+        vel[:,0]
+    )
+
+    return float(
+
+        np.clip(
+            np.std(headings)
+            /
+            np.pi,
+            0.0,
+            1.0
+        )
+    )
+
+def route_prediction_uncertainty(
+    route_info
+):
+
+    if route_info is None:
+        return 1.0
+
+    p = route_info.get(
+        "prob"
+    )
+
+    if p is None:
+        return 1.0
+
+    return float(
+        np.clip(
+            1.0-float(p),
+            0.0,
+            1.0
+        )
+    )
+
+def maneuver_uncertainty(
+    mode_info
+):
+
+    if mode_info is None:
+        return 1.0
+
+    conf = mode_info.get(
+        "display_confidence"
+    )
+
+    if conf is None:
+        return 1.0
+
+    return float(
+        np.clip(
+            1.0-float(conf),
+            0.0,
+            1.0
+        )
+    )
+# ==========================================================
+# LOAD ENTRY ELLIPSES FROM TRAJECTORY PLAYER MODEL
+# ==========================================================
+
+MODEL = MLModel.load(MODEL_PATH)
+
+ENTRY_ELLIPSES = MODEL.entry_ellipses
+
+
+class OODSupervisor(Supervisor):
+    name = "camera_ood"
+    category = "input_anomaly"
+
+    def evaluate(
+        self,
+        scene
+    ):
+
+        score = 0.0
+        flag = False
+
+        alert = scene.extra.get(
+            "alert_ood"
+        )
+
+        if alert is not None:
+
+            score = float(
+                alert[0]
+            )
+
+            flag = bool(
+                alert[1]
+            )
+
+        return SupervisorResult(
+
+            name=self.name,
+
+            category=self.category,
+
+            score=score,
+
+            confidence=max(
+                0.0,
+                1.0 - score
+            ),
+
+            flag=flag,
+
+            details={
+                "ood_score": score,
+                "ood_flag": flag
+            }
+        )
+
+class LegacyTrackUncertaintySupervisor(
+    Supervisor
+):
+
+    name = "track_uncertainty"
+
+    category = "uncertainty"
+
+    def evaluate(
+        self,
+        scene
+    ):
+
+        score = 0.0
+
+        if (
+            scene.active_track_id
+            is not None
+        ):
+
+            score = (
+                estimate_track_uncertainty(
+                    scene.frame_idx,
+                    scene.active_track_id
+                )
+            )
+
+        return SupervisorResult(
+
+            name=self.name,
+
+            category=self.category,
+
+            score=score,
+
+            confidence=
+                max(
+                    0.0,
+                    1.0-score
+                ),
+
+            flag=(score > 0.7)
+        )
+    
 # ==========================================================
 # ROBOT PATH LIBRARY
 # ==========================================================
@@ -416,7 +815,6 @@ class RobotPath:
         self.associated_track = None
 
 DEFAULT_PATHS = {
-
     "Path_1": RobotPath("Path_1")
 }
 
@@ -483,6 +881,41 @@ if len(DEFAULT_PATHS) == 0:
     DEFAULT_PATHS["Path_1"] = RobotPath(
         "Path_1"
     )
+
+
+def make_rotated_bbox(
+    cx,
+    cy,
+    width,
+    length,
+    angle_deg
+):
+
+    hw = width * 0.5
+    hl = length * 0.5
+
+    pts = np.array([
+        [-hl, -hw],
+        [ hl, -hw],
+        [ hl,  hw],
+        [-hl,  hw],
+        [-hl, -hw]
+    ])
+
+    ang = np.deg2rad(angle_deg)
+
+    R = np.array([
+        [np.cos(ang), -np.sin(ang)],
+        [np.sin(ang),  np.cos(ang)]
+    ])
+
+    pts = pts @ R.T
+
+    pts[:,0] += cx
+    pts[:,1] += cy
+
+    return pts
+
 # ==========================================================
 # VIEWER
 # ==========================================================
@@ -516,7 +949,6 @@ class MVPViewer(FigureCanvasQTAgg):
 
         self.alert_collision = False
         self.alert_cam = None
-        self.alert_ood = None
         self.active_track_id = None
 
         self.route_info = None
@@ -533,6 +965,51 @@ class MVPViewer(FigureCanvasQTAgg):
         self.near_miss = False
         self.failed_test = False
         self.evidence_log = []
+        self.supervisor_manager = (
+            SupervisorManager()
+        )
+
+        self.supervisor_manager.register(
+            OODSupervisor()
+        )
+
+        self.supervisor_manager.register(
+            LegacyTrackUncertaintySupervisor()
+        )
+
+        self.supervisor_manager.register(
+            BBoxUncertaintySupervisor()
+        )
+
+        self.supervisor_manager.register(
+            TrajectoryUncertaintySupervisor()
+        )
+
+        self.supervisor_manager.register(
+            RouteUncertaintySupervisor()
+        )
+
+        self.supervisor_manager.register(
+            ManeuverUncertaintySupervisor()
+        )
+
+        self.supervisor_results = []
+
+        self.decision_engine = (
+            DecisionEngine()
+        )
+
+
+        self.route_history = deque(
+            maxlen=10
+        )
+        self.mode_history = deque(maxlen=10)
+
+        self.route_consistency = 1.0
+        self.mode_consistency = 1.0
+
+        self.prediction_trust = 1.0
+
 
         # ------------------------
         # AGENT STATE
@@ -574,6 +1051,7 @@ class MVPViewer(FigureCanvasQTAgg):
             "motion_notify_event",
             self.on_motion
         )
+
 
     def log_evidence(self):
 
@@ -621,14 +1099,49 @@ class MVPViewer(FigureCanvasQTAgg):
                 )
         })
 
+    def compute_prediction_consistency(self):
+
+        route_score = 1.0
+        mode_score = 1.0
+
+        if len(self.route_history) >= 5:
+
+            latest = self.route_history[-1]
+
+            matches = sum(
+                r == latest
+                for r in self.route_history
+            )
+
+            route_score = matches / len(self.route_history)
+
+        if len(self.mode_history) >= 5:
+
+            latest = self.mode_history[-1]
+
+            matches = sum(
+                m == latest
+                for m in self.mode_history
+            )
+
+            mode_score = matches / len(self.mode_history)
+
+        self.route_consistency = route_score
+        self.mode_consistency = mode_score
+
+        self.prediction_trust = (
+            0.5 * route_score +
+            0.5 * mode_score
+        )
+
+        return self.prediction_trust
+
     def evaluate_scene_risk(
         self,
         frame
     ):
 
         self.minimum_ttc = 999.0
-
-        max_unc = 0.0
 
         objects = frame["objects"]
 
@@ -645,7 +1158,9 @@ class MVPViewer(FigureCanvasQTAgg):
 
         for obj in objects:
 
-            ttc = self.compute_ttc(obj)
+            ttc = self.compute_ttc(
+                obj
+            )
 
             if np.isfinite(ttc):
 
@@ -654,43 +1169,122 @@ class MVPViewer(FigureCanvasQTAgg):
                     ttc
                 )
 
-            unc = self.estimate_track_uncertainty(
-                obj["track_id"]
-            )
+        scene = SceneContext(
 
-            max_unc = max(
-                max_unc,
-                unc
-            )
+            timestamp=
+                self.current_timestamp,
 
-        ood_score = 0.0
-        ood_flag = False
+            frame_idx=
+                self.frame_idx,
 
-        if self.alert_ood:
+            active_track_id=
+                self.active_track_id,
 
-            ood_score = float(
-                self.alert_ood[0]
-            )
+            frame=
+                frame,
 
-            ood_flag = bool(
-                self.alert_ood[1]
-            )
+            route_prediction=
+                self.route_info,
 
-        self.current_trust = (
+            maneuver_prediction=
+                self.mode_info,
+
+            ttc=
+                self.minimum_ttc,
+
+            extra={
+                "alert_ood":
+                    self.alert_ood
+            }
+        )
+
+        self.supervisor_results = (
+
+            self.supervisor_manager
+                .evaluate(scene)
+        )
+
+        results = {
+            r.name: r
+            for r in self.supervisor_results
+        }
+
+        ood = results.get(
+            "camera_ood"
+        )
+
+        track = results.get(
+            "track_uncertainty"
+        )
+
+        ood_score = (
+            ood.score
+            if ood else 0.0
+        )
+
+        ood_flag = (
+            ood.flag
+            if ood else False
+        )
+
+        track_unc = (
+            track.score
+            if track else 0.0
+        )
+
+        #
+        # Legacy trust
+        #
+        legacy_trust = (
+
             1.0
             - 0.2 * ood_score
-            - 0.3 * max_unc
+            - 0.3 * track_unc
         )
 
         if ood_flag:
-            self.current_trust -= 0.30
 
+            legacy_trust -= 0.30
+
+        #
+        # Future trust
+        #
+        supervisor_trust = (
+            self.decision_engine
+            .compute_trust(
+                self.supervisor_results
+            )
+        )
+
+        #
+        # Phase 2
+        # Keep identical behavior
+        #
         self.current_trust = float(
 
             np.clip(
+                legacy_trust,
+                0.0,
+                1.0
+            )
+        )
+
+        #
+        # Available for debugging
+        #
+        self.future_trust = (
+            supervisor_trust
+        )
+
+        if ood_flag:
+
+            self.current_trust -= 0.30
+
+        self.current_trust = float(
+            np.clip(
                 self.current_trust,
-                0,
-                1
+                0.0,
+                1.0
             )
         )
 
@@ -727,8 +1321,11 @@ class MVPViewer(FigureCanvasQTAgg):
             self.decision_action = "GO"
 
         self.near_miss = (
+
             self.minimum_ttc < 1.0
+
             and
+
             not self.alert_collision
         )
 
@@ -747,10 +1344,14 @@ class MVPViewer(FigureCanvasQTAgg):
 
     def compute_ttc(self, obj):
 
-        pts = np.asarray(obj["polygon"], dtype=float)
+        cx, cy = world_to_occupancy(
+            *obj["center_world"]
+        )
 
-        if len(pts) < 3:
-            return np.inf
+        obj_pos = np.array(
+            [cx, cy],
+            dtype=float
+        )
 
         path = DEFAULT_PATHS.get(
             self.current_path_name
@@ -798,10 +1399,6 @@ class MVPViewer(FigureCanvasQTAgg):
             dtype=float
         )
 
-        obj_pos = np.mean(
-            pts,
-            axis=0
-        )
 
         # ------------------------------------
         # Path heading
@@ -913,87 +1510,6 @@ class MVPViewer(FigureCanvasQTAgg):
 
         self.current_waypoint_idx = 1
 
-    def estimate_track_uncertainty(
-        self,
-        track_id
-    ):
-
-        frame = self.frame_idx
-
-        hist = TRACK_UNCERTAINTY.get(
-            track_id,
-            []
-        )
-
-        if len(hist) < 4:
-            return 0.0
-
-        indexed = TRACK_HISTORY.get(
-            track_id,
-            []
-        )
-
-        current_idx = None
-
-        for i, h in enumerate(indexed):
-            if h[0] == frame:
-                current_idx = i
-                break
-
-        if current_idx is None:
-            return 1.0
-
-        start = max(
-            0,
-            current_idx - 4
-        )
-
-        end = current_idx + 1
-
-        recent = hist[start:end]
-
-        if len(recent) < 3:
-            return 0.0
-
-        centers = np.asarray([
-            h["center"]
-            for h in recent
-        ])
-
-        areas = np.asarray([
-            h["area"]
-            for h in recent
-        ])
-
-        pos_var = np.linalg.norm(
-            np.std(
-                centers,
-                axis=0
-            )
-        )
-
-        area_cv = (
-            np.std(areas)
-            /
-            (
-                np.mean(areas) + 1e-6
-            )
-        )
-
-        unc = (
-            0.7 * min(1.0, pos_var / 15.0)
-            +
-            0.3 * min(1.0, area_cv)
-        )
-
-        return float(
-            np.clip(
-                unc,
-                0.0,
-                1.0
-            )
-        )
-
     def draw_robot_path(self):
 
         path = DEFAULT_PATHS.get(
@@ -1057,7 +1573,6 @@ class MVPViewer(FigureCanvasQTAgg):
     def draw_entry_points(self):
 
         for artist in self.entry_artists:
-
             try:
                 artist.remove()
             except:
@@ -1065,40 +1580,47 @@ class MVPViewer(FigureCanvasQTAgg):
 
         self.entry_artists.clear()
 
-        for entry_id, (x, y) in ENTRY_POINTS.items():
+        if ENTRY_ELLIPSES is None:
+            return
+
+        for entry_id, (center, width, height, angle) in enumerate(ENTRY_ELLIPSES):
+
+            wx, wy = center
+
+            occ = world_to_occupancy(wx, wy)
+
+            if occ is None:
+                continue
+
+            px, py = occ
 
             ellipse = Ellipse(
-                (x, y),
+                xy=(px, py),
                 width=120,
                 height=80,
+                angle=angle,
                 fill=False,
                 edgecolor="orange",
                 linewidth=2.5,
-                alpha=0.8
+                alpha=0.85
             )
 
-            self.ax.add_patch(
-                ellipse
-            )
+            self.ax.add_patch(ellipse)
 
-            self.entry_artists.append(
-                ellipse
-            )
+            self.entry_artists.append(ellipse)
 
-            label = self.ax.text(
-                x,
-                y,
+            text = self.ax.text(
+                px,
+                py,
                 str(entry_id),
                 color="orange",
                 fontsize=12,
-                weight="bold",
+                fontweight="bold",
                 ha="center",
                 va="center"
             )
 
-            self.entry_artists.append(
-                label
-            )
+            self.entry_artists.append(text)
     # ==================================================
     # Mouse interaction
     # ==================================================
@@ -1525,19 +2047,46 @@ class MVPViewer(FigureCanvasQTAgg):
 
         for obj in frame["objects"]:
 
-            pts = obj["polygon"]
-
-            if len(pts) < 3:
-                continue
-
             try:
 
-                if Polygon(
-                    pts
-                ).buffer(
-                    VEHICLE_RADIUS
-                ).contains(vp):
+                cx, cy = world_to_occupancy(
+                    *obj["center_world"]
+                )
 
+                width = float(
+                    obj["bbox_width"]
+                )
+
+                length = float(
+                    obj["bbox_length"]
+                )
+
+                angle = float(
+                    obj["angle"]
+                )
+
+                expand_l, expand_w = (
+                    uncertainty_bbox(
+                        obj["track_id"]
+                    )
+                )
+
+                outer_box = make_rotated_bbox(
+                    cx,
+                    cy,
+                    width + 2*expand_w,
+                    length + 2*expand_l,
+                    angle
+                )
+
+                if Polygon(
+                    outer_box[:-1]
+                ).contains(
+                    Point(
+                        self.agent_x,
+                        self.agent_y
+                    )
+                ):
                     self.alert_collision = True
                     break
 
@@ -1574,6 +2123,26 @@ class MVPViewer(FigureCanvasQTAgg):
         )
 
         self.mode_info = pred
+        route = self.route_info
+
+        if route is not None:
+
+            self.route_history.append(
+                (
+                    int(route.get("from", -1)),
+                    int(route.get("to", -1))
+                )
+            )
+
+        mode_name = pred.get("mode")
+
+        if mode_name is not None:
+            self.mode_history.append(
+                str(mode_name)
+            )
+
+        self.compute_prediction_consistency()
+
 
     def draw_objects(self, frame):
 
@@ -1589,20 +2158,65 @@ class MVPViewer(FigureCanvasQTAgg):
                 tid
             )
 
-            pts = obj["polygon"]
+            wx, wy = obj["center_world"]
 
-            if len(pts) < 3:
-                continue
+            cx, cy = world_to_occupancy(
+                wx,
+                wy
+            )
 
-            pts = np.asarray(pts)
+            width = float(
+                obj["bbox_width"]
+            )
+
+            length = float(
+                obj["bbox_length"]
+            )
+
+            angle = float(
+                obj["angle"]
+            )
+
+            expand_l, expand_w = (
+                uncertainty_bbox(tid)
+            )
+
+            inner_box = make_rotated_bbox(
+                cx,
+                cy,
+                width,
+                length,
+                angle
+            )
+
+            outer_box = make_rotated_bbox(
+                cx,
+                cy,
+                width  + 2*expand_w,
+                length + 2*expand_l,
+                angle
+            )
 
             is_active = (
                 tid == active
             )
 
-            line, = self.ax.plot(
-                pts[:, 0],
-                pts[:, 1],
+            outer_artist, = self.ax.plot(
+                outer_box[:,0],
+                outer_box[:,1],
+                color="orange",
+                lw=1.5,
+                alpha=0.55,
+                zorder=25
+            )
+
+            self.box_artists.append(
+                outer_artist
+            )
+
+            inner_artist, = self.ax.plot(
+                inner_box[:,0],
+                inner_box[:,1],
                 color=(
                     "lime"
                     if is_active
@@ -1611,26 +2225,62 @@ class MVPViewer(FigureCanvasQTAgg):
                 lw=(
                     3
                     if is_active
-                    else 1.5
+                    else 2
                 ),
-                alpha=(
-                    1.0
-                    if is_active
-                    else 0.75
-                )
+                zorder=30
             )
-
-            self.box_artists.append(line)
 
             self.box_artists.append(
-                self.ax.text(
-                    pts[:, 0].mean(),
-                    pts[:, 1].mean(),
-                    str(tid),
-                    color="yellow",
-                    fontsize=8
-                )
+                inner_artist
             )
+
+            vx, vy = obj[
+                "velocity_world"
+            ]
+
+            speed = np.hypot(
+                vx,
+                vy
+            )
+
+            if speed > 0.05:
+
+                hx = (
+                    cx
+                    + 40*np.cos(
+                        np.deg2rad(angle)
+                    )
+                )
+
+                hy = (
+                    cy
+                    + 40*np.sin(
+                        np.deg2rad(angle)
+                    )
+                )
+
+                arrow, = self.ax.plot(
+                    [cx, hx],
+                    [cy, hy],
+                    color="yellow",
+                    lw=2,
+                    zorder=35
+                )
+
+                self.box_artists.append(
+                    arrow
+                )
+
+            txt = self.ax.text(
+                cx,
+                cy,
+                str(tid),
+                color="yellow",
+                fontsize=8,
+                ha="center"
+            )
+
+            self.box_artists.append(txt)
 
     def clear_artists(self):
 
@@ -2190,7 +2840,6 @@ class MainWindow(QMainWindow):
             self.label_ood.setText(
                 "OOD : N/A"
             )
-
         #
         # Color coding
         #
