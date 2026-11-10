@@ -24,8 +24,27 @@ from collections import deque
 # BEV BACKGROUND SUPPORT
 # ==========================================================
 
-OCCUPANCY_PROJECTION = "occupancy_projection.pkl"
-BEV_FOLDER = "E:/TUVE/bev_img/bev_img"
+CONFIG_FILE = "mvp-config.json"
+
+with open(CONFIG_FILE, "r") as f:
+    CFG = json.load(f)
+
+DATA_ROOT = Path(
+    CFG["paths"]["dataset_root"]
+)
+DATA_PATH = str(DATA_ROOT / CFG["paths"]["save_path"])
+EXTRA_PATHS = CFG["extra_paths"]
+
+OCCUPANCY_PROJECTION = str(
+    DATA_ROOT /
+    EXTRA_PATHS["occupancy_projection"]
+)
+
+BEV_FOLDER = str(
+    DATA_ROOT /
+    EXTRA_PATHS["mask_folder"]
+)
+
 EXPORT_FAST_MODE = True
 
 bev_lookup = {}
@@ -71,14 +90,26 @@ def load_occupancy_projection():
 
 P_OCC = None
 
-try:
-    P_OCC = load_occupancy_projection()
-except Exception:
-    print("[WARN] occupancy_projection.pkl not found")
+def get_projection():
+
+    global P_OCC
+
+    if P_OCC is not None:
+        return P_OCC
+
+    try:
+
+        P_OCC = load_occupancy_projection()
+
+    except Exception:
+
+        P_OCC = None
+
+    return P_OCC
 
 
 def world_to_occupancy(wx, wy):
-    global P_OCC
+    P_OCC = get_projection()
 
     if P_OCC is None:
         return wx, wy
@@ -1475,10 +1506,16 @@ class OnlineClassifier:
         zone = topo["zone"]
         if zone == "I":
             display_label = "INTERSECTION"
-            display_conf = 1.0
+            display_conf = max(
+                route_prob,
+                max(pm.values())
+            )
         elif zone is None:
             display_label = f"ROUTE {route_pair[0]}→{route_pair[1]}"
-            display_conf = route_prob
+            display_conf = max(
+                route_prob,
+                max(pm.values())
+            )
         else:
             #
             # determine motion direction relative
@@ -1495,7 +1532,10 @@ class OnlineClassifier:
             else:
                 direction = "I→"
             display_label = f"B{zone} {direction}"
-            display_conf = 1.0
+            display_conf = max(
+                route_prob,
+                max(pm.values())
+            )
         self._cached_info = {
             "topology_zone": zone,
             "topology_label": display_label,
@@ -3035,7 +3075,7 @@ def main():
     parser.add_argument(
         "--data",
         type=str,
-        default="2026_02_27_final.json",
+        default=DATA_PATH,
         help="Path to trajectories JSON",
     )
     parser.add_argument("--entries", type=int, default=7, help="K (entry areas)")

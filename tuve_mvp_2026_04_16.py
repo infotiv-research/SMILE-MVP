@@ -8,24 +8,20 @@ import math
 from pathlib import Path
 from typing import Tuple
 from shapely.geometry import Point, Polygon
-import joblib
-import numpy as np
-from sklearn.decomposition import PCA
-from sklearn.linear_model import LogisticRegression
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QVBoxLayout, QHBoxLayout,
     QPushButton, QSlider, QLabel,
-    QFileDialog, QComboBox
+    QComboBox
 )
 from collections import deque
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Ellipse
-from trajectory_player_v6_20261109 import MLModel  
+from trajectory_player import MLModel  
 from safety_framework import (
     SceneContext,
     Supervisor,
@@ -319,40 +315,60 @@ def normalize_cam_id(cam):
 
 def load_ood(cam_id):
 
+    cam_id = str(cam_id)
+
     if cam_id in OOD_CACHE:
         return OOD_CACHE[cam_id]
 
-    npz = (
-        Path(OOD_ROOT)
-        / cam_id
-        / "ood_score.npz"
+    path = os.path.join(
+        OOD_ROOT,
+        f"{cam_id}.csv"
     )
 
-    if not npz.exists():
-        OOD_CACHE[cam_id] = ({}, [])
+    if not os.path.exists(path):
+
+        OOD_CACHE[cam_id] = {
+            "scores": {},
+            "keys": np.asarray([], dtype=np.int64),
+        }
+
         return OOD_CACHE[cam_id]
 
-    dtype = np.dtype([
-        ("id", np.uint64),
-        ("ood_score", np.float32),
-        ("pred", np.uint8)
-    ])
+    try:
 
-    arr = np.fromfile(npz, dtype=dtype)
+        import pandas as pd
 
-    result = (
-        {
-            str(i):
-            (float(s), bool(p))
-            for i, s, p in arr
-        },
-        list(map(str, arr["id"]))
-    )
+        df = pd.read_csv(path)
 
-    OOD_CACHE[cam_id] = result
+        result = {}
 
-    return result
+        for _, row in df.iterrows():
 
+            ts = int(row["frame_id"])
+
+            result[str(ts)] = (
+                float(row["ood_score"]),
+                bool(row["ood_flag"]),
+            )
+
+        keys = np.asarray(
+            sorted(int(k) for k in result.keys()),
+            dtype=np.int64,
+        )
+
+        OOD_CACHE[cam_id] = {
+            "scores": result,
+            "keys": keys,
+        }
+
+    except Exception:
+
+        OOD_CACHE[cam_id] = {
+            "scores": {},
+            "keys": np.asarray([], dtype=np.int64),
+        }
+
+    return OOD_CACHE[cam_id]
 
 
 # ==========================================================
@@ -469,7 +485,14 @@ for frame_idx, frame in enumerate(tracks):
                 cy
             )
         )
+TRACK_HISTORY_IDX = {}
 
+for tid, hist in TRACK_HISTORY.items():
+
+    TRACK_HISTORY_IDX[tid] = np.asarray(
+        [h[0] for h in hist],
+        dtype=np.int32
+    )
 # ==========================================================
 # BBOX UNCERTAINTY MODEL
 # ==========================================================
@@ -700,13 +723,6 @@ def maneuver_uncertainty(
             1.0
         )
     )
-# ==========================================================
-# LOAD ENTRY ELLIPSES FROM TRAJECTORY PLAYER MODEL
-# ==========================================================
-
-MODEL = MLModel.load(MODEL_PATH)
-
-ENTRY_ELLIPSES = MODEL.entry_ellipses
 
 
 class OODSupervisor(Supervisor):
@@ -942,10 +958,13 @@ class MVPViewer(FigureCanvasQTAgg):
 
         self.box_artists = []
         self.entry_markers = []
+        self.entry_artists = []
         self.trajectory_artist = None
+
         self.track_history = {}        
 
         self.frame_idx = 0
+        self.draw_entry_points()
 
         self.alert_collision = False
         self.alert_cam = None
@@ -955,7 +974,6 @@ class MVPViewer(FigureCanvasQTAgg):
         self.mode_info = None
 
         self.track_ids_current = []
-        self.entry_artists = []
         self.trajectory_artist = None        
         self.current_traj_len = 0
         self.minimum_ttc = 999.0
@@ -1003,12 +1021,21 @@ class MVPViewer(FigureCanvasQTAgg):
         self.route_history = deque(
             maxlen=10
         )
-        self.mode_history = deque(maxlen=10)
+        self.route_history = deque(
+            maxlen=10
+        )
+
+        self.mode_history = deque(
+            maxlen=10
+        )
 
         self.route_consistency = 1.0
         self.mode_consistency = 1.0
 
         self.prediction_trust = 1.0
+
+        # prediction lookup cache
+        self._last_lookup_key = None
 
 
         # ------------------------
@@ -1732,11 +1759,18 @@ class MVPViewer(FigureCanvasQTAgg):
             []
         )
 
-        history = [
-            h
-            for h in history
-            if h[0] <= self.frame_idx
-        ]
+        idxs = TRACK_HISTORY_IDX.get(tid)
+
+        if idxs is None:
+            return
+
+        end_idx = np.searchsorted(
+            idxs,
+            self.frame_idx,
+            side="right"
+        )
+
+        history = history[:end_idx]
 
         self.current_traj_len = len(
             history
@@ -1887,9 +1921,6 @@ class MVPViewer(FigureCanvasQTAgg):
         )
 
         self.log_evidence()
-
-        self.draw_entry_points()
-
         self.draw_active_trajectory()
 
         self.draw_robot_path()
@@ -2013,16 +2044,41 @@ class MVPViewer(FigureCanvasQTAgg):
 
         for cam in self.relevant_cameras:
 
-            scores, keys = load_ood(cam)
+            ood_data = load_ood(cam)
 
-            if not keys:
+            scores = ood_data.get("scores", {})
+
+            keys = ood_data.get(
+                "keys",
+                np.asarray([], dtype=np.int64)
+            )
+
+            if keys.size == 0:
                 continue
 
-            nearest_key = min(
+            idx = np.searchsorted(
                 keys,
-                key=lambda k:
-                abs(int(k) - ts)
+                ts
             )
+
+            if idx == 0:
+
+                nearest_key = str(keys[0])
+
+            elif idx >= len(keys):
+
+                nearest_key = str(keys[-1])
+
+            else:
+
+                before = keys[idx - 1]
+                after = keys[idx]
+
+                nearest_key = str(
+                    before
+                    if abs(ts - before) <= abs(after - ts)
+                    else after
+                )
 
             result = scores.get(
                 nearest_key
@@ -2045,7 +2101,17 @@ class MVPViewer(FigureCanvasQTAgg):
         # collision
         #
 
-        for obj in frame["objects"]:
+        objects = frame["objects"]
+
+        if self.active_track_id is not None:
+
+            objects = [
+                o
+                for o in objects
+                if o["track_id"] == self.active_track_id
+            ]
+
+        for obj in objects:
 
             try:
 
@@ -2094,6 +2160,15 @@ class MVPViewer(FigureCanvasQTAgg):
                 pass
 
     def lookup_predictions(self):
+        key = (
+            self.current_timestamp,
+            self.active_track_id,
+        )
+
+        if key == self._last_lookup_key:
+            return
+
+        self._last_lookup_key = key        
 
         self.route_info = None
         self.mode_info = None
@@ -2147,19 +2222,11 @@ class MVPViewer(FigureCanvasQTAgg):
 
         mode_name = pred.get("mode")
 
-        if (
-            mode_name is not None
-            and mode_name != ""
-        ):
+        if mode_name is not None:
 
-            if (
-                not self.mode_history
-                or self.mode_history[-1] != mode_name
-            ):
-                self.mode_history.append(
-                    str(mode_name)
-                )
-
+            self.mode_history.append(
+                str(mode_name)
+            )
         self.compute_prediction_consistency()
 
 
@@ -2497,6 +2564,7 @@ class MainWindow(QMainWindow):
         self.new_path_btn.clicked.connect(self.create_new_path)
         self.save_path_btn.clicked.connect(self.save_path_library)
         self.load_path_btn.clicked.connect(self.load_path_library)
+        self._last_visible_tracks = None
 
     def save_path_library(self):
         save_paths()
@@ -2775,22 +2843,31 @@ class MainWindow(QMainWindow):
                     f"{route.get('to','?')}"
                 )
 
-            conf = mode.get(
-                "display_confidence"
+            mode_probs = mode.get(
+                "mode_probs",
+                {}
             )
 
-            if conf is not None:
+            if mode_probs:
 
-                self.label_route_prob.setText(
-                    f"Display Conf : {conf:.2f}"
+                mode_name = mode.get(
+                    "mode",
+                    "unknown"
+                )
+
+                conf = mode_probs.get(
+                    mode_name,
+                    0.0
+                )
+
+                self.label_mode_prob.setText(
+                    f"Mode Prob : {conf:.2f}"
                 )
 
             else:
 
-                prob = route.get("prob")
-
-                self.label_route_prob.setText(
-                    f"Route Prob : {prob:.2f}"
+                self.label_mode_prob.setText(
+                    "Mode Prob : N/A"
                 )
 
 
@@ -2925,9 +3002,14 @@ class MainWindow(QMainWindow):
 
     def refresh_object_combo(self):
 
-        visible = sorted(
-            set(self.viewer.track_ids_current)
+        visible = tuple(
+            sorted(set(self.viewer.track_ids_current))
         )
+
+        if visible == self._last_visible_tracks:
+            return
+
+        self._last_visible_tracks = visible
 
         selected = self.viewer.active_track_id
 
@@ -2938,7 +3020,6 @@ class MainWindow(QMainWindow):
         for tid in visible:
             self.object_select.addItem(str(tid))
 
-        # keep previously selected track
         if selected in visible:
 
             idx = self.object_select.findText(
@@ -2950,10 +3031,7 @@ class MainWindow(QMainWindow):
 
         elif visible:
 
-            selected = visible[0]
-
-            self.viewer.active_track_id = selected
-
+            self.viewer.active_track_id = visible[0]
             self.object_select.setCurrentIndex(0)
 
         self.object_select.blockSignals(False)
@@ -2977,6 +3055,8 @@ class MainWindow(QMainWindow):
             self.viewer.agent_y = path.waypoints[0][1]
             self.viewer.current_waypoint_idx = 1
         self.viewer.frame_idx = 0
+        self.viewer.route_history.clear()
+        self.viewer.mode_history.clear()        
         self.viewer.update_frame(0)
 
     def seek(self, value):
