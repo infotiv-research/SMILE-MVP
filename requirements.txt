@@ -10,3 +10,4 @@ networkx
 shapely
 h5py
 hdf5plugin
+tqdm

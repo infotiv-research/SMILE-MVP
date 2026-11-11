@@ -1,0 +1,1970 @@
+{
+  "method": "Online-equivalent intersection supervisor replay; OOD/TTC layers excluded",
+  "outcomes": [
+    {
+      "id": "scenario_1_window_01_path_01",
+      "window_id": "scenario_1_window_01",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 110,
+        "YIELD": 49,
+        "CLEAR_INTERSECTION": 3
+      },
+      "reasons": {
+        "no_conflicting_entry": 106,
+        "robot_not_yet_approaching_entry": 4,
+        "entry_control": 49,
+        "approaching_forklift": 3
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_01_path_02",
+      "window_id": "scenario_1_window_01",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 95,
+        "YIELD": 5,
+        "CLEAR_INTERSECTION": 22
+      },
+      "reasons": {
+        "no_conflicting_entry": 66,
+        "entry_control": 5,
+        "approaching_forklift": 22,
+        "non_conflicting_robot_path": 29
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_01_path_03",
+      "window_id": "scenario_1_window_01",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 128,
+        "YIELD": 51,
+        "CLEAR_INTERSECTION": 2
+      },
+      "reasons": {
+        "no_conflicting_entry": 125,
+        "robot_not_yet_approaching_entry": 3,
+        "entry_control": 51,
+        "approaching_forklift": 2
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_01_path_04",
+      "window_id": "scenario_1_window_01",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 156,
+        "YIELD": 49,
+        "CLEAR_INTERSECTION": 3
+      },
+      "reasons": {
+        "no_conflicting_entry": 151,
+        "robot_not_yet_approaching_entry": 4,
+        "entry_control": 49,
+        "approaching_forklift": 3,
+        "non_conflicting_robot_path": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_01_path_05",
+      "window_id": "scenario_1_window_01",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 124,
+        "YIELD": 5,
+        "CLEAR_INTERSECTION": 50
+      },
+      "reasons": {
+        "no_conflicting_entry": 123,
+        "entry_control": 5,
+        "approaching_forklift": 50,
+        "non_conflicting_robot_path": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_01_path_06",
+      "window_id": "scenario_1_window_01",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 147,
+        "YIELD": 49,
+        "CLEAR_INTERSECTION": 3
+      },
+      "reasons": {
+        "no_conflicting_entry": 142,
+        "robot_not_yet_approaching_entry": 4,
+        "entry_control": 49,
+        "approaching_forklift": 3,
+        "non_conflicting_robot_path": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_01_path_07",
+      "window_id": "scenario_1_window_01",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 107,
+        "YIELD": 5,
+        "CLEAR_INTERSECTION": 50
+      },
+      "reasons": {
+        "no_conflicting_entry": 106,
+        "entry_control": 5,
+        "approaching_forklift": 50,
+        "non_conflicting_robot_path": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_01_path_08",
+      "window_id": "scenario_1_window_01",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 151,
+        "YIELD": 49,
+        "CLEAR_INTERSECTION": 3
+      },
+      "reasons": {
+        "no_conflicting_entry": 146,
+        "robot_not_yet_approaching_entry": 4,
+        "entry_control": 49,
+        "approaching_forklift": 3,
+        "non_conflicting_robot_path": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_01_path_09",
+      "window_id": "scenario_1_window_01",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 133,
+        "YIELD": 49,
+        "CLEAR_INTERSECTION": 3
+      },
+      "reasons": {
+        "no_conflicting_entry": 129,
+        "robot_not_yet_approaching_entry": 4,
+        "entry_control": 49,
+        "approaching_forklift": 3
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_01_path_10",
+      "window_id": "scenario_1_window_01",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 118,
+        "YIELD": 49,
+        "CLEAR_INTERSECTION": 3
+      },
+      "reasons": {
+        "no_conflicting_entry": 114,
+        "robot_not_yet_approaching_entry": 4,
+        "entry_control": 49,
+        "approaching_forklift": 3
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_02_path_01",
+      "window_id": "scenario_1_window_02",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 86,
+        "YIELD": 231,
+        "CLEAR_INTERSECTION": 6
+      },
+      "reasons": {
+        "no_conflicting_entry": 84,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 231,
+        "approaching_forklift": 6
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_02_path_02",
+      "window_id": "scenario_1_window_02",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 297,
+        "YIELD": 3,
+        "CLEAR_INTERSECTION": 23
+      },
+      "reasons": {
+        "no_conflicting_entry": 84,
+        "entry_control": 3,
+        "approaching_forklift": 23,
+        "non_conflicting_robot_path": 213
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_02_path_03",
+      "window_id": "scenario_1_window_02",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 86,
+        "YIELD": 231,
+        "CLEAR_INTERSECTION": 6
+      },
+      "reasons": {
+        "no_conflicting_entry": 84,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 231,
+        "approaching_forklift": 6
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_02_path_04",
+      "window_id": "scenario_1_window_02",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 86,
+        "YIELD": 231,
+        "CLEAR_INTERSECTION": 6
+      },
+      "reasons": {
+        "no_conflicting_entry": 84,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 231,
+        "approaching_forklift": 6
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_02_path_05",
+      "window_id": "scenario_1_window_02",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 262,
+        "YIELD": 3,
+        "CLEAR_INTERSECTION": 58
+      },
+      "reasons": {
+        "no_conflicting_entry": 84,
+        "entry_control": 3,
+        "approaching_forklift": 58,
+        "non_conflicting_robot_path": 178
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_02_path_06",
+      "window_id": "scenario_1_window_02",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 86,
+        "YIELD": 231,
+        "CLEAR_INTERSECTION": 6
+      },
+      "reasons": {
+        "no_conflicting_entry": 84,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 231,
+        "approaching_forklift": 6
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_02_path_07",
+      "window_id": "scenario_1_window_02",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 263,
+        "YIELD": 3,
+        "CLEAR_INTERSECTION": 57
+      },
+      "reasons": {
+        "no_conflicting_entry": 84,
+        "entry_control": 3,
+        "approaching_forklift": 57,
+        "non_conflicting_robot_path": 179
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_02_path_08",
+      "window_id": "scenario_1_window_02",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 86,
+        "YIELD": 231,
+        "CLEAR_INTERSECTION": 6
+      },
+      "reasons": {
+        "no_conflicting_entry": 84,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 231,
+        "approaching_forklift": 6
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_02_path_09",
+      "window_id": "scenario_1_window_02",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 86,
+        "YIELD": 231,
+        "CLEAR_INTERSECTION": 6
+      },
+      "reasons": {
+        "no_conflicting_entry": 84,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 231,
+        "approaching_forklift": 6
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_02_path_10",
+      "window_id": "scenario_1_window_02",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 86,
+        "YIELD": 231,
+        "CLEAR_INTERSECTION": 6
+      },
+      "reasons": {
+        "no_conflicting_entry": 84,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 231,
+        "approaching_forklift": 6
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_03_path_01",
+      "window_id": "scenario_1_window_03",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 174,
+        "YIELD": 9,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "no_conflicting_entry": 172,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 9,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": false
+    },
+    {
+      "id": "scenario_1_window_03_path_02",
+      "window_id": "scenario_1_window_03",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 97,
+        "YIELD": 2,
+        "CLEAR_INTERSECTION": 10
+      },
+      "reasons": {
+        "no_conflicting_entry": 97,
+        "entry_control": 2,
+        "approaching_forklift": 10
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_03_path_03",
+      "window_id": "scenario_1_window_03",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 199,
+        "YIELD": 9,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "no_conflicting_entry": 197,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 9,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": false
+    },
+    {
+      "id": "scenario_1_window_03_path_04",
+      "window_id": "scenario_1_window_03",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 150,
+        "YIELD": 9,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "no_conflicting_entry": 148,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 9,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": false
+    },
+    {
+      "id": "scenario_1_window_03_path_05",
+      "window_id": "scenario_1_window_03",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 150,
+        "YIELD": 2,
+        "CLEAR_INTERSECTION": 10
+      },
+      "reasons": {
+        "no_conflicting_entry": 150,
+        "entry_control": 2,
+        "approaching_forklift": 10
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_03_path_06",
+      "window_id": "scenario_1_window_03",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 193,
+        "YIELD": 9,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "no_conflicting_entry": 191,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 9,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": false
+    },
+    {
+      "id": "scenario_1_window_03_path_07",
+      "window_id": "scenario_1_window_03",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 148,
+        "YIELD": 2,
+        "CLEAR_INTERSECTION": 10
+      },
+      "reasons": {
+        "no_conflicting_entry": 148,
+        "entry_control": 2,
+        "approaching_forklift": 10
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_03_path_08",
+      "window_id": "scenario_1_window_03",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 160,
+        "YIELD": 9,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "no_conflicting_entry": 158,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 9,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": false
+    },
+    {
+      "id": "scenario_1_window_03_path_09",
+      "window_id": "scenario_1_window_03",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 195,
+        "YIELD": 9,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "no_conflicting_entry": 193,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 9,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": false
+    },
+    {
+      "id": "scenario_1_window_03_path_10",
+      "window_id": "scenario_1_window_03",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 125,
+        "YIELD": 9,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "no_conflicting_entry": 123,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 9,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": false
+    },
+    {
+      "id": "scenario_1_window_04_path_01",
+      "window_id": "scenario_1_window_04",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 148,
+        "YIELD": 54,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 54,
+        "no_conflicting_entry": 134,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_04_path_02",
+      "window_id": "scenario_1_window_04",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "YIELD": 67,
+        "GO": 42,
+        "CLEAR_INTERSECTION": 2
+      },
+      "reasons": {
+        "entry_control": 67,
+        "no_conflicting_entry": 42,
+        "approaching_forklift": 2
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_04_path_03",
+      "window_id": "scenario_1_window_04",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 130,
+        "YIELD": 54,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 54,
+        "no_conflicting_entry": 116,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_04_path_04",
+      "window_id": "scenario_1_window_04",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 115,
+        "YIELD": 54,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 54,
+        "no_conflicting_entry": 101,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_04_path_05",
+      "window_id": "scenario_1_window_04",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "YIELD": 67,
+        "GO": 108,
+        "CLEAR_INTERSECTION": 2
+      },
+      "reasons": {
+        "entry_control": 67,
+        "no_conflicting_entry": 108,
+        "approaching_forklift": 2
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_04_path_06",
+      "window_id": "scenario_1_window_04",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 135,
+        "YIELD": 54,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 54,
+        "no_conflicting_entry": 121,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_04_path_07",
+      "window_id": "scenario_1_window_04",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "YIELD": 67,
+        "GO": 111,
+        "CLEAR_INTERSECTION": 2
+      },
+      "reasons": {
+        "entry_control": 67,
+        "no_conflicting_entry": 111,
+        "approaching_forklift": 2
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_04_path_08",
+      "window_id": "scenario_1_window_04",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 183,
+        "YIELD": 54,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 54,
+        "no_conflicting_entry": 169,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_04_path_09",
+      "window_id": "scenario_1_window_04",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 78,
+        "YIELD": 54,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 54,
+        "no_conflicting_entry": 64,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_04_path_10",
+      "window_id": "scenario_1_window_04",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 110,
+        "YIELD": 54,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 54,
+        "no_conflicting_entry": 96,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_05_path_01",
+      "window_id": "scenario_1_window_05",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "YIELD": 87,
+        "GO": 64,
+        "CLEAR_INTERSECTION": 39
+      },
+      "reasons": {
+        "entry_control": 87,
+        "no_conflicting_entry": 40,
+        "approaching_forklift": 39,
+        "non_conflicting_robot_path": 24
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_05_path_02",
+      "window_id": "scenario_1_window_05",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "YIELD": 87,
+        "GO": 38,
+        "CLEAR_INTERSECTION": 8
+      },
+      "reasons": {
+        "entry_control": 87,
+        "no_conflicting_entry": 36,
+        "approaching_forklift": 8,
+        "non_conflicting_robot_path": 2
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_05_path_03",
+      "window_id": "scenario_1_window_05",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 79,
+        "YIELD": 74,
+        "CLEAR_INTERSECTION": 46
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 13,
+        "entry_control": 74,
+        "no_conflicting_entry": 48,
+        "approaching_forklift": 46,
+        "non_conflicting_robot_path": 18
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_05_path_04",
+      "window_id": "scenario_1_window_05",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 83,
+        "YIELD": 73,
+        "CLEAR_INTERSECTION": 49
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 73,
+        "no_conflicting_entry": 54,
+        "approaching_forklift": 49,
+        "non_conflicting_robot_path": 15
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_05_path_05",
+      "window_id": "scenario_1_window_05",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "YIELD": 87,
+        "GO": 62,
+        "CLEAR_INTERSECTION": 64
+      },
+      "reasons": {
+        "entry_control": 87,
+        "no_conflicting_entry": 62,
+        "approaching_forklift": 64
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_05_path_06",
+      "window_id": "scenario_1_window_05",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 78,
+        "YIELD": 73,
+        "CLEAR_INTERSECTION": 37
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 73,
+        "no_conflicting_entry": 39,
+        "approaching_forklift": 37,
+        "non_conflicting_robot_path": 25
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_05_path_07",
+      "window_id": "scenario_1_window_05",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "YIELD": 87,
+        "GO": 39,
+        "CLEAR_INTERSECTION": 7
+      },
+      "reasons": {
+        "entry_control": 87,
+        "no_conflicting_entry": 36,
+        "approaching_forklift": 7,
+        "non_conflicting_robot_path": 3
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_05_path_08",
+      "window_id": "scenario_1_window_05",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 78,
+        "YIELD": 75,
+        "CLEAR_INTERSECTION": 47
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 12,
+        "entry_control": 75,
+        "no_conflicting_entry": 49,
+        "approaching_forklift": 47,
+        "non_conflicting_robot_path": 17
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_05_path_09",
+      "window_id": "scenario_1_window_05",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 70,
+        "YIELD": 73,
+        "CLEAR_INTERSECTION": 22
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 73,
+        "no_conflicting_entry": 39,
+        "approaching_forklift": 22,
+        "non_conflicting_robot_path": 17
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_05_path_10",
+      "window_id": "scenario_1_window_05",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 69,
+        "YIELD": 73,
+        "CLEAR_INTERSECTION": 20
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 73,
+        "no_conflicting_entry": 39,
+        "approaching_forklift": 20,
+        "non_conflicting_robot_path": 16
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_06_path_01",
+      "window_id": "scenario_1_window_06",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 14,
+        "YIELD": 225
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 225
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": false,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_06_path_02",
+      "window_id": "scenario_1_window_06",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "YIELD": 109
+      },
+      "reasons": {
+        "entry_control": 109
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": false,
+      "completed_route": false,
+      "pass": false
+    },
+    {
+      "id": "scenario_1_window_06_path_03",
+      "window_id": "scenario_1_window_06",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 14,
+        "YIELD": 174
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 174
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": false,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_06_path_04",
+      "window_id": "scenario_1_window_06",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 12,
+        "YIELD": 188
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 12,
+        "entry_control": 188
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": false,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_06_path_05",
+      "window_id": "scenario_1_window_06",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "YIELD": 140
+      },
+      "reasons": {
+        "entry_control": 140
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": false,
+      "completed_route": false,
+      "pass": false
+    },
+    {
+      "id": "scenario_1_window_06_path_06",
+      "window_id": "scenario_1_window_06",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 14,
+        "YIELD": 189
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 189
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": false,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_06_path_07",
+      "window_id": "scenario_1_window_06",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "YIELD": 171
+      },
+      "reasons": {
+        "entry_control": 171
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": false,
+      "completed_route": false,
+      "pass": false
+    },
+    {
+      "id": "scenario_1_window_06_path_08",
+      "window_id": "scenario_1_window_06",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 14,
+        "YIELD": 148
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 148
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": false,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_06_path_09",
+      "window_id": "scenario_1_window_06",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 14,
+        "YIELD": 194
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 194
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": false,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_06_path_10",
+      "window_id": "scenario_1_window_06",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 14,
+        "YIELD": 185
+      },
+      "reasons": {
+        "robot_not_yet_approaching_entry": 14,
+        "entry_control": 185
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": false,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_07_path_01",
+      "window_id": "scenario_1_window_07",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 186,
+        "YIELD": 62,
+        "CLEAR_INTERSECTION": 34
+      },
+      "reasons": {
+        "no_conflicting_entry": 163,
+        "entry_control": 62,
+        "approaching_forklift": 34,
+        "non_conflicting_robot_path": 23
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_07_path_02",
+      "window_id": "scenario_1_window_07",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 255,
+        "YIELD": 2,
+        "CLEAR_INTERSECTION": 25
+      },
+      "reasons": {
+        "no_conflicting_entry": 163,
+        "entry_control": 2,
+        "approaching_forklift": 25,
+        "non_conflicting_robot_path": 92
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_07_path_03",
+      "window_id": "scenario_1_window_07",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 183,
+        "YIELD": 62,
+        "CLEAR_INTERSECTION": 37
+      },
+      "reasons": {
+        "no_conflicting_entry": 163,
+        "entry_control": 62,
+        "approaching_forklift": 37,
+        "non_conflicting_robot_path": 20
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_07_path_04",
+      "window_id": "scenario_1_window_07",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 184,
+        "YIELD": 62,
+        "CLEAR_INTERSECTION": 36
+      },
+      "reasons": {
+        "no_conflicting_entry": 163,
+        "entry_control": 62,
+        "approaching_forklift": 36,
+        "non_conflicting_robot_path": 21
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_07_path_05",
+      "window_id": "scenario_1_window_07",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 237,
+        "YIELD": 2,
+        "CLEAR_INTERSECTION": 43
+      },
+      "reasons": {
+        "no_conflicting_entry": 163,
+        "entry_control": 2,
+        "approaching_forklift": 43,
+        "non_conflicting_robot_path": 74
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_07_path_06",
+      "window_id": "scenario_1_window_07",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 181,
+        "YIELD": 62,
+        "CLEAR_INTERSECTION": 39
+      },
+      "reasons": {
+        "no_conflicting_entry": 163,
+        "entry_control": 62,
+        "approaching_forklift": 39,
+        "non_conflicting_robot_path": 18
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_07_path_07",
+      "window_id": "scenario_1_window_07",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 217,
+        "YIELD": 2,
+        "CLEAR_INTERSECTION": 63
+      },
+      "reasons": {
+        "no_conflicting_entry": 163,
+        "entry_control": 2,
+        "approaching_forklift": 63,
+        "non_conflicting_robot_path": 54
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_07_path_08",
+      "window_id": "scenario_1_window_07",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 183,
+        "YIELD": 62,
+        "CLEAR_INTERSECTION": 37
+      },
+      "reasons": {
+        "no_conflicting_entry": 163,
+        "entry_control": 62,
+        "approaching_forklift": 37,
+        "non_conflicting_robot_path": 20
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_07_path_09",
+      "window_id": "scenario_1_window_07",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 185,
+        "YIELD": 62,
+        "CLEAR_INTERSECTION": 35
+      },
+      "reasons": {
+        "no_conflicting_entry": 163,
+        "entry_control": 62,
+        "approaching_forklift": 35,
+        "non_conflicting_robot_path": 22
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_07_path_10",
+      "window_id": "scenario_1_window_07",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 183,
+        "YIELD": 62,
+        "CLEAR_INTERSECTION": 37
+      },
+      "reasons": {
+        "no_conflicting_entry": 163,
+        "entry_control": 62,
+        "approaching_forklift": 37,
+        "non_conflicting_robot_path": 20
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_08_path_01",
+      "window_id": "scenario_1_window_08",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 118,
+        "YIELD": 13,
+        "CLEAR_INTERSECTION": 29
+      },
+      "reasons": {
+        "no_conflicting_entry": 86,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 13,
+        "approaching_forklift": 29,
+        "non_conflicting_robot_path": 30
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": false
+    },
+    {
+      "id": "scenario_1_window_08_path_02",
+      "window_id": "scenario_1_window_08",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 92,
+        "YIELD": 4,
+        "CLEAR_INTERSECTION": 13
+      },
+      "reasons": {
+        "no_conflicting_entry": 52,
+        "entry_control": 4,
+        "approaching_forklift": 13,
+        "non_conflicting_robot_path": 40
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_08_path_03",
+      "window_id": "scenario_1_window_08",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 141,
+        "YIELD": 13,
+        "CLEAR_INTERSECTION": 54
+      },
+      "reasons": {
+        "no_conflicting_entry": 127,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 13,
+        "approaching_forklift": 54,
+        "non_conflicting_robot_path": 12
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_08_path_04",
+      "window_id": "scenario_1_window_08",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 137,
+        "YIELD": 13,
+        "CLEAR_INTERSECTION": 54
+      },
+      "reasons": {
+        "no_conflicting_entry": 124,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 13,
+        "approaching_forklift": 54,
+        "non_conflicting_robot_path": 11
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": false
+    },
+    {
+      "id": "scenario_1_window_08_path_05",
+      "window_id": "scenario_1_window_08",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 124,
+        "YIELD": 4,
+        "CLEAR_INTERSECTION": 46
+      },
+      "reasons": {
+        "no_conflicting_entry": 95,
+        "entry_control": 4,
+        "approaching_forklift": 46,
+        "non_conflicting_robot_path": 29
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_08_path_06",
+      "window_id": "scenario_1_window_08",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 147,
+        "YIELD": 13,
+        "CLEAR_INTERSECTION": 56
+      },
+      "reasons": {
+        "no_conflicting_entry": 135,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 13,
+        "approaching_forklift": 56,
+        "non_conflicting_robot_path": 10
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": false
+    },
+    {
+      "id": "scenario_1_window_08_path_07",
+      "window_id": "scenario_1_window_08",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 120,
+        "YIELD": 4,
+        "CLEAR_INTERSECTION": 38
+      },
+      "reasons": {
+        "no_conflicting_entry": 88,
+        "entry_control": 4,
+        "approaching_forklift": 38,
+        "non_conflicting_robot_path": 32
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_08_path_08",
+      "window_id": "scenario_1_window_08",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 136,
+        "YIELD": 13,
+        "CLEAR_INTERSECTION": 54
+      },
+      "reasons": {
+        "no_conflicting_entry": 123,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 13,
+        "approaching_forklift": 54,
+        "non_conflicting_robot_path": 11
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_08_path_09",
+      "window_id": "scenario_1_window_08",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 126,
+        "YIELD": 13,
+        "CLEAR_INTERSECTION": 46
+      },
+      "reasons": {
+        "no_conflicting_entry": 105,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 13,
+        "approaching_forklift": 46,
+        "non_conflicting_robot_path": 19
+      },
+      "yielded_at_boundary": false,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": false
+    },
+    {
+      "id": "scenario_1_window_08_path_10",
+      "window_id": "scenario_1_window_08",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 121,
+        "YIELD": 13,
+        "CLEAR_INTERSECTION": 36
+      },
+      "reasons": {
+        "no_conflicting_entry": 93,
+        "robot_not_yet_approaching_entry": 2,
+        "entry_control": 13,
+        "approaching_forklift": 36,
+        "non_conflicting_robot_path": 26
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_09_path_01",
+      "window_id": "scenario_1_window_09",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 144,
+        "YIELD": 49,
+        "CLEAR_INTERSECTION": 3
+      },
+      "reasons": {
+        "no_conflicting_entry": 144,
+        "entry_control": 49,
+        "approaching_forklift": 3
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_09_path_02",
+      "window_id": "scenario_1_window_09",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 108,
+        "YIELD": 2,
+        "CLEAR_INTERSECTION": 23
+      },
+      "reasons": {
+        "no_conflicting_entry": 81,
+        "entry_control": 2,
+        "approaching_forklift": 23,
+        "non_conflicting_robot_path": 27
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_09_path_03",
+      "window_id": "scenario_1_window_09",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 164,
+        "YIELD": 49,
+        "CLEAR_INTERSECTION": 3
+      },
+      "reasons": {
+        "no_conflicting_entry": 164,
+        "entry_control": 49,
+        "approaching_forklift": 3
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_09_path_04",
+      "window_id": "scenario_1_window_09",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 133,
+        "YIELD": 49,
+        "CLEAR_INTERSECTION": 3
+      },
+      "reasons": {
+        "no_conflicting_entry": 133,
+        "entry_control": 49,
+        "approaching_forklift": 3
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_09_path_05",
+      "window_id": "scenario_1_window_09",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 112,
+        "YIELD": 2,
+        "CLEAR_INTERSECTION": 48
+      },
+      "reasons": {
+        "no_conflicting_entry": 110,
+        "entry_control": 2,
+        "approaching_forklift": 48,
+        "non_conflicting_robot_path": 2
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_09_path_06",
+      "window_id": "scenario_1_window_09",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 151,
+        "YIELD": 49,
+        "CLEAR_INTERSECTION": 3
+      },
+      "reasons": {
+        "no_conflicting_entry": 151,
+        "entry_control": 49,
+        "approaching_forklift": 3
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_09_path_07",
+      "window_id": "scenario_1_window_09",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 110,
+        "YIELD": 2,
+        "CLEAR_INTERSECTION": 48
+      },
+      "reasons": {
+        "no_conflicting_entry": 108,
+        "entry_control": 2,
+        "approaching_forklift": 48,
+        "non_conflicting_robot_path": 2
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_09_path_08",
+      "window_id": "scenario_1_window_09",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 118,
+        "YIELD": 49,
+        "CLEAR_INTERSECTION": 3
+      },
+      "reasons": {
+        "no_conflicting_entry": 118,
+        "entry_control": 49,
+        "approaching_forklift": 3
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_09_path_09",
+      "window_id": "scenario_1_window_09",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 153,
+        "YIELD": 49,
+        "CLEAR_INTERSECTION": 3
+      },
+      "reasons": {
+        "no_conflicting_entry": 153,
+        "entry_control": 49,
+        "approaching_forklift": 3
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_09_path_10",
+      "window_id": "scenario_1_window_09",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 83,
+        "YIELD": 49,
+        "CLEAR_INTERSECTION": 3
+      },
+      "reasons": {
+        "no_conflicting_entry": 83,
+        "entry_control": 49,
+        "approaching_forklift": 3
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_10_path_01",
+      "window_id": "scenario_1_window_10",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 89,
+        "YIELD": 44,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "no_conflicting_entry": 86,
+        "robot_not_yet_approaching_entry": 3,
+        "entry_control": 44,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_10_path_02",
+      "window_id": "scenario_1_window_10",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 87,
+        "YIELD": 14,
+        "CLEAR_INTERSECTION": 34
+      },
+      "reasons": {
+        "no_conflicting_entry": 87,
+        "entry_control": 14,
+        "approaching_forklift": 34
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_10_path_03",
+      "window_id": "scenario_1_window_10",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 141,
+        "YIELD": 44,
+        "CLEAR_INTERSECTION": 2
+      },
+      "reasons": {
+        "no_conflicting_entry": 138,
+        "robot_not_yet_approaching_entry": 3,
+        "entry_control": 44,
+        "approaching_forklift": 2
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_10_path_04",
+      "window_id": "scenario_1_window_10",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 157,
+        "YIELD": 44,
+        "CLEAR_INTERSECTION": 2
+      },
+      "reasons": {
+        "no_conflicting_entry": 154,
+        "robot_not_yet_approaching_entry": 3,
+        "entry_control": 44,
+        "approaching_forklift": 2
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_10_path_05",
+      "window_id": "scenario_1_window_10",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 112,
+        "YIELD": 14,
+        "CLEAR_INTERSECTION": 34
+      },
+      "reasons": {
+        "no_conflicting_entry": 111,
+        "entry_control": 14,
+        "approaching_forklift": 34,
+        "non_conflicting_robot_path": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_10_path_06",
+      "window_id": "scenario_1_window_10",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 124,
+        "YIELD": 44,
+        "CLEAR_INTERSECTION": 2
+      },
+      "reasons": {
+        "no_conflicting_entry": 121,
+        "robot_not_yet_approaching_entry": 3,
+        "entry_control": 44,
+        "approaching_forklift": 2
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_10_path_07",
+      "window_id": "scenario_1_window_10",
+      "expected_coverage": "clearance",
+      "action_counts": {
+        "GO": 132,
+        "YIELD": 14,
+        "CLEAR_INTERSECTION": 34
+      },
+      "reasons": {
+        "no_conflicting_entry": 131,
+        "entry_control": 14,
+        "approaching_forklift": 34,
+        "non_conflicting_robot_path": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": true,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_10_path_08",
+      "window_id": "scenario_1_window_10",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 90,
+        "YIELD": 44,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "no_conflicting_entry": 87,
+        "robot_not_yet_approaching_entry": 3,
+        "entry_control": 44,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_10_path_09",
+      "window_id": "scenario_1_window_10",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 192,
+        "YIELD": 44,
+        "CLEAR_INTERSECTION": 2
+      },
+      "reasons": {
+        "no_conflicting_entry": 189,
+        "robot_not_yet_approaching_entry": 3,
+        "entry_control": 44,
+        "approaching_forklift": 2
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    },
+    {
+      "id": "scenario_1_window_10_path_10",
+      "window_id": "scenario_1_window_10",
+      "expected_coverage": "entry_control",
+      "action_counts": {
+        "GO": 88,
+        "YIELD": 44,
+        "CLEAR_INTERSECTION": 1
+      },
+      "reasons": {
+        "no_conflicting_entry": 85,
+        "robot_not_yet_approaching_entry": 3,
+        "entry_control": 44,
+        "approaching_forklift": 1
+      },
+      "yielded_at_boundary": true,
+      "clear_command_while_inside": true,
+      "completed_route": false,
+      "pass": true
+    }
+  ]
+}

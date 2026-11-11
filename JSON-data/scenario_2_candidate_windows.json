@@ -1,0 +1,186 @@
+{
+  "scenario": "Scenario 2: operation outside intersections",
+  "selection_method": "Recorded forklift activity at least 180 px from the intersection",
+  "windows": [
+    {
+      "focus_track_id": 31,
+      "window_start_frame": 9243,
+      "window_center_frame": 9293,
+      "window_end_frame": 9343,
+      "timestamp": 1746007920818,
+      "distance_to_intersection_px": 260.2,
+      "speed_px_s": 29.8,
+      "speed_band": "moving",
+      "maneuver": "moving",
+      "route": {
+        "from": 1,
+        "to": 2,
+        "uncertainty": 0.2731262567688352
+      },
+      "nearby_forklift_count": 2,
+      "id": "scenario_2_window_01"
+    },
+    {
+      "focus_track_id": 45,
+      "window_start_frame": 10159,
+      "window_center_frame": 10209,
+      "window_end_frame": 10259,
+      "timestamp": 1746008012418,
+      "distance_to_intersection_px": 714.2,
+      "speed_px_s": 9.7,
+      "speed_band": "slow",
+      "maneuver": "stationary",
+      "route": {
+        "from": 3,
+        "to": 0,
+        "uncertainty": 0.02308797489756842
+      },
+      "nearby_forklift_count": 1,
+      "id": "scenario_2_window_02"
+    },
+    {
+      "focus_track_id": 54,
+      "window_start_frame": 15532,
+      "window_center_frame": 15582,
+      "window_end_frame": 15632,
+      "timestamp": 1746008549718,
+      "distance_to_intersection_px": 463.5,
+      "speed_px_s": 0.9,
+      "speed_band": "stationary/very slow",
+      "maneuver": "loading",
+      "route": {
+        "from": 1,
+        "to": 0,
+        "uncertainty": 0.20788380322311162
+      },
+      "nearby_forklift_count": 0,
+      "id": "scenario_2_window_03"
+    },
+    {
+      "focus_track_id": 92,
+      "window_start_frame": 25402,
+      "window_center_frame": 25452,
+      "window_end_frame": 25502,
+      "timestamp": 1746009536718,
+      "distance_to_intersection_px": 601.3,
+      "speed_px_s": 34.2,
+      "speed_band": "moving",
+      "maneuver": "moving",
+      "route": {
+        "from": 0,
+        "to": 1,
+        "uncertainty": 0.20801817201967843
+      },
+      "nearby_forklift_count": 2,
+      "id": "scenario_2_window_04"
+    },
+    {
+      "focus_track_id": 0,
+      "window_start_frame": 70,
+      "window_center_frame": 120,
+      "window_end_frame": 170,
+      "timestamp": 1746007003518,
+      "distance_to_intersection_px": 629.1,
+      "speed_px_s": 161.8,
+      "speed_band": "moving",
+      "maneuver": "moving",
+      "route": {
+        "from": 0,
+        "to": 0,
+        "uncertainty": 0.4622079468243001
+      },
+      "nearby_forklift_count": 1,
+      "id": "scenario_2_window_05"
+    },
+    {
+      "focus_track_id": 1,
+      "window_start_frame": 4217,
+      "window_center_frame": 4267,
+      "window_end_frame": 4317,
+      "timestamp": 1746007418218,
+      "distance_to_intersection_px": 438.3,
+      "speed_px_s": 27.8,
+      "speed_band": "moving",
+      "maneuver": "moving",
+      "route": {
+        "from": 2,
+        "to": 0,
+        "uncertainty": 0.5474668735391301
+      },
+      "nearby_forklift_count": 1,
+      "id": "scenario_2_window_06"
+    },
+    {
+      "focus_track_id": 39,
+      "window_start_frame": 8818,
+      "window_center_frame": 8868,
+      "window_end_frame": 8918,
+      "timestamp": 1746007878318,
+      "distance_to_intersection_px": 342.2,
+      "speed_px_s": 71.5,
+      "speed_band": "moving",
+      "maneuver": "moving",
+      "route": {
+        "from": 3,
+        "to": 3,
+        "uncertainty": 0.6001882781219229
+      },
+      "nearby_forklift_count": 1,
+      "id": "scenario_2_window_07"
+    },
+    {
+      "focus_track_id": 112,
+      "window_start_frame": 29795,
+      "window_center_frame": 29845,
+      "window_end_frame": 29895,
+      "timestamp": 1746009976018,
+      "distance_to_intersection_px": 664.9,
+      "speed_px_s": 64.1,
+      "speed_band": "moving",
+      "maneuver": "moving",
+      "route": {
+        "from": 0,
+        "to": 2,
+        "uncertainty": 0.6405576265681217
+      },
+      "nearby_forklift_count": 1,
+      "id": "scenario_2_window_08"
+    },
+    {
+      "focus_track_id": 16,
+      "window_start_frame": 5555,
+      "window_center_frame": 5605,
+      "window_end_frame": 5655,
+      "timestamp": 1746007552018,
+      "distance_to_intersection_px": 232.7,
+      "speed_px_s": 116.6,
+      "speed_band": "moving",
+      "maneuver": "moving",
+      "route": {
+        "from": 3,
+        "to": 1,
+        "uncertainty": 0.0818660941092304
+      },
+      "nearby_forklift_count": 0,
+      "id": "scenario_2_window_09"
+    },
+    {
+      "focus_track_id": 32,
+      "window_start_frame": 7666,
+      "window_center_frame": 7716,
+      "window_end_frame": 7766,
+      "timestamp": 1746007763118,
+      "distance_to_intersection_px": 222.9,
+      "speed_px_s": 50.9,
+      "speed_band": "moving",
+      "maneuver": "moving",
+      "route": {
+        "from": 2,
+        "to": 3,
+        "uncertainty": 0.006280929732737639
+      },
+      "nearby_forklift_count": 0,
+      "id": "scenario_2_window_10"
+    }
+  ]
+}

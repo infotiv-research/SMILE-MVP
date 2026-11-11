@@ -1,13 +1,13 @@
 {
   "paths": {
-    "dataset_root": "Data",
+    "dataset_root": "Data/confidential_tuve_dataset",
     "mask_folder": "bev_img/bev_img",
     "dataset_config_file": "dataset_config.json",
     "camera_folder": "",
-    "ood_root": "ood_detections",
+    "ood_root": "Data/ood_detections",
     "calib_intr_root": "volvo_calib/intr",
-    "camera_lookup_table": "camera_visibility_lookup_table.pkl",
-    "save_path": "../JSON-data/trajectories_2026_02_27.json"
+    "camera_lookup_table": "Models/camera_visibility_lookup_table.pkl",
+    "save_path": "JSON-data/final.json"
   },
   "runtime": {
     "window_range": [0, 33000],
@@ -30,9 +30,9 @@
     "default_height": 360
   },
   "extra_paths": {
-    "mask_folder": "bev_res/bev_res",
-    "predictions": "../JSON-data/predictions_2026_02_27.json",
-    "occupancy_projection": "occupancy_projection.pkl",
-    "robot_paths": "../JSON-data/robot_paths.json"
+    "mask_folder": "bev_res",
+    "predictions": "JSON-data/predictions_2026_02_27.json",
+    "occupancy_projection": "Data/occupancy_projection_mot_compat.pkl",
+    "robot_paths": "JSON-data/robot_paths.json"
   }
 }

@@ -1,0 +1,11 @@
+{
+  "dataset_backed": true,
+  "window_count": 10,
+  "paths_per_window": 10,
+  "instance_count": 100,
+  "coverage": {
+    "entry_control": 70,
+    "clearance": 30
+  },
+  "note": "Decision-performance metrics must be calculated from an exported replay evidence log; no synthetic forklift ground truth is used."
+}

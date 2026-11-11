@@ -2,25 +2,50 @@
 # TUVE MVP FULL PyQt6 Port (Feature Complete + Info Panel)
 # ==========================================================
 
-import sys, os, json, cv2, pickle 
+import sys, os, json, gzip, cv2, pickle 
 import numpy as np
 import math
 from pathlib import Path
 from typing import Tuple
-from shapely.geometry import Point, Polygon
+from shapely.geometry import LineString, Point, Polygon
+from shapely.ops import nearest_points
 import joblib
+
+from scenario_supervisor import evaluate_scenario_1
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QVBoxLayout, QHBoxLayout,
     QPushButton, QSlider, QLabel,
-    QFileDialog, QComboBox
+    QFileDialog, QComboBox, QCheckBox
 )
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from matplotlib.patches import Ellipse
+from matplotlib.patches import Ellipse, Polygon as MplPolygon
+
+
+def _consume_cli_option(flag):
+    """Remove and return a simple option so Qt does not receive it."""
+    if flag not in sys.argv:
+        return None
+    index = sys.argv.index(flag)
+    if index + 1 >= len(sys.argv):
+        raise ValueError(f"{flag} requires a value")
+    value = sys.argv[index + 1]
+    del sys.argv[index:index + 2]
+    return value
+
+
+SCENARIO_REPLAY_FILE = _consume_cli_option("--scenario-replay")
+SCENARIO_REPLAY_ID = _consume_cli_option("--scenario-id")
+REFERENCE_PATHS_FILE = _consume_cli_option("--reference-paths")
+SCENARIO_REPLAY = None
+SCENARIO_FRAME_META = {}
+# In "All paths" replay mode this holds the ten independent AMR route variants
+# associated with the active recorded forklift window.
+SCENARIO_ALL_PATHS = []
 
 # ==========================================================
 # CONFIG (unchanged)
@@ -33,21 +58,52 @@ CONFIG_FILE = "mvp-config.json"
 with open(CONFIG_FILE, "r") as _f:
     CFG = json.load(_f)
 
-DATA_ROOT = Path(CFG["paths"]["dataset_root"])
+REPO_ROOT = Path(__file__).resolve().parent
+
+def repo_path(path_value):
+    """Resolve configuration paths from the repository, not the dataset symlink."""
+    path = Path(path_value)
+    return path if path.is_absolute() else REPO_ROOT / path
+
+
+def load_json_file(path):
+    """Read plain or gzip-compressed JSON replay artifacts."""
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt") as source:
+        return json.load(source)
+
+DATA_ROOT = repo_path(CFG["paths"]["dataset_root"])
 EXTRA_PATHS = CFG["extra_paths"]
 
 MASK_FOLDER = str(DATA_ROOT / EXTRA_PATHS["mask_folder"])
-SAVE_PATH = str(DATA_ROOT / CFG["paths"]["save_path"])
-PRED_PATH = str(DATA_ROOT / EXTRA_PATHS["predictions"])
-OOD_ROOT = str(DATA_ROOT / CFG["paths"]["ood_root"])
-CAMERA_LOOKUP_PATH = str(DATA_ROOT / CFG["paths"]["camera_lookup_table"])
-OCCUPANCY_PATH = str(DATA_ROOT / EXTRA_PATHS["occupancy_projection"])
-PATH_DB = str(DATA_ROOT / EXTRA_PATHS["robot_paths"])
+SAVE_PATH = str(repo_path(CFG["paths"]["save_path"]))
+PRED_PATH = str(repo_path(EXTRA_PATHS["predictions"]))
+OOD_ROOT = str(repo_path(CFG["paths"]["ood_root"]))
+CAMERA_LOOKUP_PATH = str(repo_path(CFG["paths"]["camera_lookup_table"]))
+OCCUPANCY_PATH = str(repo_path(EXTRA_PATHS["occupancy_projection"]))
+PATH_DB = str(repo_path(EXTRA_PATHS["robot_paths"]))
+REFERENCE_PATHS_PATH = repo_path(
+    REFERENCE_PATHS_FILE or "JSON-data/robot_reference_paths.json"
+)
+INTERSECTION_AREA_PATH = repo_path("JSON-data/intersection_area.json")
+ROBOT_OPERATING_AREA_PATH = repo_path("JSON-data/robot_operating_area.json")
 
 VEHICLE_RADIUS = CFG["runtime"]["vehicle_radius"]
 MAX_DISTANCE = CFG["runtime"]["max_distance"]
 
 OOD_CACHE = {}
+
+INTERSECTION_POINTS = []
+if INTERSECTION_AREA_PATH.exists():
+    with open(INTERSECTION_AREA_PATH, "r") as _intersection_file:
+        INTERSECTION_POINTS = json.load(_intersection_file).get("polygon_image_px", [])
+
+ROBOT_OPERATING_AREA_POINTS = []
+if ROBOT_OPERATING_AREA_PATH.exists():
+    with open(ROBOT_OPERATING_AREA_PATH, "r") as _operating_area_file:
+        ROBOT_OPERATING_AREA_POINTS = json.load(_operating_area_file).get(
+            "polygon_image_px", []
+        )
 
 # ==========================================================
 # LOAD STATIC DATA
@@ -271,6 +327,81 @@ for frame in pred_data:
 
     prediction_lookup[ts] = per_track
 
+
+def build_station_points(reference_tracks, reference_predictions):
+    """Locate every trajectory-prediction station from the full recording."""
+    first_centres = {}
+    samples = {}
+    for frame in reference_tracks:
+        timestamp = int(frame["timestamp"])
+        predictions = reference_predictions.get(timestamp, {})
+        for obj in frame["objects"]:
+            polygon = np.asarray(obj.get("polygon", []), dtype=float)
+            if len(polygon) < 3:
+                continue
+            track_id = int(obj["track_id"])
+            first_centres.setdefault(track_id, tuple(np.mean(polygon, axis=0)))
+            route = predictions.get(track_id, {}).get("route")
+            if not route or route.get("from") is None:
+                continue
+            samples.setdefault(route["from"], []).append(first_centres[track_id])
+    return {
+        entry_id: tuple(np.mean(np.asarray(points), axis=0))
+        for entry_id, points in samples.items()
+    }
+
+
+# Build stations before an optional scenario replay replaces the full track set.
+STATIC_ENTRY_POINTS = build_station_points(tracks, prediction_lookup)
+
+
+def load_scenario_replay(path, instance_id=None):
+    """Load generated Scenario 1 data as a drop-in tracks/predictions source."""
+    payload = load_json_file(path)
+
+    instances = payload.get("instances", [])
+    if not instances:
+        raise ValueError(f"No replay instances in {path}")
+
+    instance = next(
+        (item for item in instances if item.get("id") == instance_id),
+        instances[0] if instance_id is None else None
+    )
+    if instance is None:
+        available = ", ".join(item.get("id", "?") for item in instances)
+        raise ValueError(f"Scenario instance {instance_id!r} not found; available: {available}")
+
+    replay_tracks = []
+    replay_predictions = {}
+    metadata = {}
+    for frame in instance["frames"]:
+        timestamp = int(frame["timestamp"])
+        replay_tracks.append({"timestamp": timestamp, "objects": frame.get("objects", [])})
+        replay_predictions[timestamp] = {
+            int(pred["track_id"]): pred for pred in frame.get("predictions", [])
+        }
+        metadata[timestamp] = frame
+
+    instance = dict(instance)
+    instance["intersection_polygon_px"] = payload["intersection_polygon_px"]
+    instance["replay_scenario"] = payload.get("scenario", "")
+    return instance, replay_tracks, replay_predictions, metadata
+
+
+if SCENARIO_REPLAY_FILE:
+    scenario_path = repo_path(SCENARIO_REPLAY_FILE)
+    (
+        SCENARIO_REPLAY,
+        tracks,
+        prediction_lookup,
+        SCENARIO_FRAME_META,
+    ) = load_scenario_replay(scenario_path, SCENARIO_REPLAY_ID)
+    print(f"Replaying {SCENARIO_REPLAY['id']}: {SCENARIO_REPLAY['title']}")
+
+# The normal dataset length was computed before an optional replay replaces
+# ``tracks``. Always use the active source's length for sliders and playback.
+NUM_FRAMES = len(tracks)
+
 # ==========================================================
 # PRECOMPUTED TRACK HISTORY
 # ==========================================================
@@ -350,56 +481,35 @@ for frame in tracks:
                 frame["timestamp"]
         })
 
+
+def rebuild_runtime_track_caches():
+    """Rebuild per-track state after changing the active replay instance."""
+    global TRACK_HISTORY, TRACK_UNCERTAINTY
+    TRACK_HISTORY = {}
+    TRACK_UNCERTAINTY = {}
+    for frame_idx, frame in enumerate(tracks):
+        for obj in frame["objects"]:
+            track_id = obj["track_id"]
+            polygon = np.asarray(obj["polygon"], dtype=np.float32)
+            if len(polygon) < 3:
+                continue
+            center = np.mean(polygon, axis=0)
+            TRACK_HISTORY.setdefault(track_id, []).append(
+                (frame_idx, float(center[0]), float(center[1]))
+            )
+            TRACK_UNCERTAINTY.setdefault(track_id, []).append({
+                "center": center,
+                "area": cv2.contourArea(polygon),
+                "frame": frame["timestamp"],
+            })
+
 # ==========================================================
 # AUTO BUILD ENTRY POINTS FROM ROUTE PREDICTIONS
 # ==========================================================
 
-ENTRY_SAMPLES = {}
-
-for timestamp, pred_frame in prediction_lookup.items():
-
-    for tid, pred in pred_frame.items():
-
-        route = pred.get("route")
-
-        if not route:
-            continue
-
-        entry_id = route.get("from")
-
-        if entry_id is None:
-            continue
-
-        hist = TRACK_HISTORY.get(
-            int(tid),
-            []
-        )
-
-        if not hist:
-            continue
-
-        first_pt = hist[0]
-
-        ENTRY_SAMPLES.setdefault(
-            entry_id,
-            []
-        ).append(
-            (
-                first_pt[1],
-                first_pt[2]
-            )
-        )
-
-ENTRY_POINTS = {}
-
-for entry_id, pts in ENTRY_SAMPLES.items():
-
-    pts = np.asarray(pts)
-
-    ENTRY_POINTS[entry_id] = (
-        float(np.mean(pts[:, 0])),
-        float(np.mean(pts[:, 1]))
-    )
+# Station circles are intentionally sourced from the full recording, so every
+# trajectory-prediction class remains visible during short scenario replays.
+ENTRY_POINTS = STATIC_ENTRY_POINTS
 
 # ==========================================================
 # ROBOT PATH LIBRARY
@@ -419,6 +529,24 @@ DEFAULT_PATHS = {
 
     "Path_1": RobotPath("Path_1")
 }
+
+
+def load_reference_paths():
+    """Load user-authored routes without mixing them into the live path library."""
+    if not REFERENCE_PATHS_PATH.exists():
+        return {}
+    with open(REFERENCE_PATHS_PATH, "r") as reference_file:
+        return json.load(reference_file)
+
+
+def save_reference_paths(reference_paths):
+    with open(REFERENCE_PATHS_PATH, "w") as reference_file:
+        json.dump(reference_paths, reference_file, indent=2)
+
+
+def reference_path_sort_key(name):
+    suffix = name.rsplit("_", 1)[-1]
+    return (0, int(suffix)) if suffix.isdigit() else (1, name)
 
 
 def save_paths():
@@ -478,6 +606,51 @@ def load_paths():
 
 load_paths()
 
+def install_replay_path():
+    """Install the active scenario AMR route without saving it to the library."""
+    if not SCENARIO_REPLAY:
+        return
+    replay_path = RobotPath("Path_1")
+    replay_path.waypoints = [
+        (float(x), float(y))
+        for x, y in SCENARIO_REPLAY["robot_path"]
+    ]
+    replay_path.speed = float(SCENARIO_REPLAY["robot_speed_px_per_frame"])
+    DEFAULT_PATHS["Path_1"] = replay_path
+
+
+def activate_scenario_replay(instance_id, show_all_paths=False):
+    """Switch the global data source to another generated scenario instance."""
+    global SCENARIO_REPLAY, tracks, prediction_lookup, SCENARIO_FRAME_META, NUM_FRAMES, SCENARIO_ALL_PATHS
+    if not SCENARIO_REPLAY_FILE:
+        return
+    replay_path = repo_path(SCENARIO_REPLAY_FILE)
+    if show_all_paths:
+        all_instances = load_json_file(replay_path).get("instances", [])
+        selected = next((item for item in all_instances if item.get("id") == instance_id), None)
+        window_id = selected.get("window_id") if selected else None
+        SCENARIO_ALL_PATHS = [
+            item for item in all_instances if item.get("window_id") == window_id
+        ]
+        # Use the longest sibling replay so every independently moving AMR
+        # has recorded forklift imagery for its complete visible route.
+        if SCENARIO_ALL_PATHS:
+            instance_id = max(SCENARIO_ALL_PATHS, key=lambda item: len(item.get("frames", [])))["id"]
+    else:
+        SCENARIO_ALL_PATHS = []
+    (
+        SCENARIO_REPLAY,
+        tracks,
+        prediction_lookup,
+        SCENARIO_FRAME_META,
+    ) = load_scenario_replay(replay_path, instance_id)
+    NUM_FRAMES = len(tracks)
+    rebuild_runtime_track_caches()
+    install_replay_path()
+
+
+install_replay_path()
+
 if len(DEFAULT_PATHS) == 0:
 
     DEFAULT_PATHS["Path_1"] = RobotPath(
@@ -498,6 +671,48 @@ class MVPViewer(FigureCanvasQTAgg):
 
         self.img = self.ax.imshow(mask0, cmap="gray")
 
+        if len(ROBOT_OPERATING_AREA_POINTS) >= 3:
+            self.operating_area_artist = MplPolygon(
+                ROBOT_OPERATING_AREA_POINTS,
+                closed=True,
+                facecolor="limegreen",
+                edgecolor="lime",
+                linewidth=2.0,
+                alpha=0.14,
+                zorder=25,
+                label="Robot operating area",
+            )
+            self.ax.add_patch(self.operating_area_artist)
+            self.operating_area_label = self.ax.text(
+                0.02, 0.035, "ROBOT OPERATING AREA", color="lime", fontsize=8,
+                ha="left", va="bottom", weight="bold", zorder=60,
+                transform=self.ax.transAxes,
+            )
+        else:
+            self.operating_area_artist = None
+            self.operating_area_label = None
+
+        if len(INTERSECTION_POINTS) >= 3:
+            self.intersection_artist = MplPolygon(
+                INTERSECTION_POINTS,
+                closed=True,
+                facecolor="deepskyblue",
+                edgecolor="cyan",
+                linewidth=2.5,
+                alpha=0.22,
+                zorder=35,
+                label="Intersection area",
+            )
+            self.ax.add_patch(self.intersection_artist)
+            self.intersection_label = self.ax.text(
+                0.02, 0.075, "INTERSECTION", color="cyan", fontsize=9,
+                ha="left", va="bottom", weight="bold", zorder=60,
+                transform=self.ax.transAxes,
+            )
+        else:
+            self.intersection_artist = None
+            self.intersection_label = None
+
         self.vehicle_dot, = self.ax.plot(
             [], [],
             "bo",
@@ -517,7 +732,13 @@ class MVPViewer(FigureCanvasQTAgg):
         self.alert_collision = False
         self.alert_cam = None
         self.alert_ood = None
-        self.active_track_id = None
+        # A generated replay declares the forklift that caused the interaction.
+        # Keep it selected instead of defaulting to the lowest visible ID.
+        self.active_track_id = (
+            int(SCENARIO_REPLAY["focus_track_id"])
+            if SCENARIO_REPLAY and SCENARIO_REPLAY.get("focus_track_id") is not None
+            else None
+        )
 
         self.route_info = None
         self.mode_info = None
@@ -557,8 +778,19 @@ class MVPViewer(FigureCanvasQTAgg):
         self.path_artist = None
 
         self.path_edit_mode = False
+        self.show_reference_paths = False
+        self.reference_path_edit_mode = False
+        self.reference_path_edit_name = None
+        self.reference_path_edit_waypoints = []
 
         self.dragging = False
+        self.parallel_robot_states = []
+        self.parallel_last_frame = None
+        self.use_precomputed_behavior = True
+        self.safe_parking_active = False
+        self.safe_parking_arrived = False
+        self.safe_parking_target = None
+        self.safe_parking_clear_frames = 0
 
         self.mpl_connect(
             "button_press_event",
@@ -605,6 +837,9 @@ class MVPViewer(FigureCanvasQTAgg):
             "decision":
                 self.decision_action,
 
+            "intersection_reason":
+                getattr(self, "intersection_reason", None),
+
             "collision":
                 bool(
                     self.alert_collision
@@ -621,6 +856,60 @@ class MVPViewer(FigureCanvasQTAgg):
                 )
         })
 
+    def path_enters_intersection(self):
+        """Whether the remaining AMR route intersects the defined area."""
+        if len(INTERSECTION_POINTS) < 3:
+            return False
+        path = DEFAULT_PATHS.get(self.current_path_name)
+        if path is None or len(path.waypoints) < 2:
+            return False
+        route = [(self.agent_x, self.agent_y)] + path.waypoints[
+            self.current_waypoint_idx:
+        ]
+        return len(route) >= 2 and LineString(route).intersects(
+            Polygon(INTERSECTION_POINTS)
+        )
+
+    def robot_time_to_intersection(self):
+        """Approximate seconds before the AMR reaches the intersection edge."""
+        if not self.path_enters_intersection():
+            return np.inf
+        path = DEFAULT_PATHS.get(self.current_path_name)
+        if path is None:
+            return np.inf
+        if len(tracks) < 2:
+            return np.inf
+        frame = min(self.frame_idx, len(tracks) - 1)
+        prior = max(0, frame - 1)
+        dt_s = (tracks[frame]["timestamp"] - tracks[prior]["timestamp"]) / 1000.0
+        if dt_s <= 0:
+            dt_s = 0.1
+        speed_px_s = (path.speed * self.agent_speed_factor) / dt_s
+        if speed_px_s <= 1e-6:
+            return np.inf
+        return Point(self.agent_x, self.agent_y).distance(
+            Polygon(INTERSECTION_POINTS)
+        ) / speed_px_s
+
+    def observed_pixel_velocity(self, obj):
+        """Estimate BEV velocity from consecutive recorded polygon centres."""
+        if "velocity_px_s" in obj:
+            return obj["velocity_px_s"]
+        history = [
+            item for item in TRACK_HISTORY.get(obj["track_id"], [])
+            if item[0] <= self.frame_idx
+        ]
+        if len(history) < 2:
+            return [0.0, 0.0]
+        previous, current = history[-2:]
+        dt_s = (tracks[current[0]]["timestamp"] - tracks[previous[0]]["timestamp"]) / 1000.0
+        if dt_s <= 0:
+            return [0.0, 0.0]
+        return [
+            (current[1] - previous[1]) / dt_s,
+            (current[2] - previous[2]) / dt_s,
+        ]
+
     def evaluate_scene_risk(
         self,
         frame
@@ -630,18 +919,11 @@ class MVPViewer(FigureCanvasQTAgg):
 
         max_unc = 0.0
 
+        # TTC is a scene-safety quantity: any forklift with a short closing
+        # time can require a protective action.  ``active_track_id`` remains
+        # a presentation/control selection only; it must not exclude other
+        # forklifts from the minimum-TTC decision.
         objects = frame["objects"]
-
-        if self.active_track_id is not None:
-
-            objects = [
-
-                o for o in objects
-
-                if o["track_id"]
-                ==
-                self.active_track_id
-            ]
 
         for obj in objects:
 
@@ -725,6 +1007,78 @@ class MVPViewer(FigureCanvasQTAgg):
         else:
 
             self.decision_action = "GO"
+
+        # Scenario 1 intersection entry/clearance supervisor. This applies to
+        # the ordinary recording viewer as well as generated scenario replay.
+        if len(INTERSECTION_POINTS) >= 3:
+            # Safety is evaluated against the complete recorded scene.  A
+            # replay's focus track is only a visualization/reporting aid;
+            # every forklift in or approaching the intersection can delay
+            # entry, require clearance, or trigger the fail-safe response.
+            intersection_objects = frame["objects"]
+            intersection_forklifts = []
+            intersection_uncertainty = 0.0
+            for obj in intersection_objects:
+                pred = prediction_lookup.get(
+                    int(self.current_timestamp), {}
+                ).get(int(obj["track_id"]), {})
+                intersection_forklifts.append({
+                    "track_id": obj["track_id"],
+                    "polygon": obj["polygon"],
+                    "velocity_px_s": self.observed_pixel_velocity(obj),
+                    "maneuver": pred.get("mode", "moving"),
+                })
+                intersection_uncertainty = max(
+                    intersection_uncertainty,
+                    self.estimate_track_uncertainty(obj["track_id"]),
+                )
+
+            replay_frame = SCENARIO_FRAME_META.get(
+                int(self.current_timestamp), {}
+            )
+            scenario_uncertainty = max(
+                intersection_uncertainty,
+                float(replay_frame.get("perception_uncertainty", 0.0)),
+            )
+            intersection_result = evaluate_scenario_1(
+                [self.agent_x, self.agent_y],
+                intersection_forklifts,
+                INTERSECTION_POINTS,
+                ood_flag=ood_flag,
+                uncertainty=scenario_uncertainty,
+                robot_path_intersects_intersection=self.path_enters_intersection(),
+                robot_entry_time_s=self.robot_time_to_intersection(),
+            )
+            self.intersection_reason = intersection_result["reason"]
+            # Keep an already more restrictive TTC decision, otherwise apply
+            # the intersection-specific entry, clearance or fail-safe action.
+            action_priority = {
+                "GO": 0, "SLOW": 1, "YIELD": 2,
+                "CLEAR_INTERSECTION": 2, "STOP": 3,
+            }
+            if action_priority.get(intersection_result["action"], 0) >= action_priority.get(
+                self.decision_action, 0
+            ):
+                self.decision_action = intersection_result["action"]
+
+        # Scenario 2 head-on mitigation. Move to the nearest boundary of the
+        # approved operating area and remain parked until the opposing forklift
+        # has been absent for a short confirmation interval.
+        scenario_2_replay = SCENARIO_REPLAY and str(
+            SCENARIO_REPLAY.get("replay_scenario", "")
+        ).startswith("Scenario 2")
+        if scenario_2_replay and self.head_on_forklift_present(frame):
+            self.begin_safe_parking()
+            if self.safe_parking_active:
+                self.safe_parking_clear_frames = 0
+                self.decision_action = "PARK_SAFE"
+        elif self.safe_parking_active:
+            self.safe_parking_clear_frames += 1
+            if self.safe_parking_arrived and self.safe_parking_clear_frames >= 10:
+                self.resume_from_safe_parking()
+                self.decision_action = "GO"
+            else:
+                self.decision_action = "PARK_SAFE"
 
         self.near_miss = (
             self.minimum_ttc < 1.0
@@ -996,6 +1350,38 @@ class MVPViewer(FigureCanvasQTAgg):
 
     def draw_robot_path(self):
 
+        if SCENARIO_ALL_PATHS:
+            colors = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+                "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+            ]
+            for index, replay_path in enumerate(SCENARIO_ALL_PATHS):
+                waypoints = replay_path.get("robot_path", [])
+                if len(waypoints) < 2:
+                    continue
+                xs = [point[0] for point in waypoints]
+                ys = [point[1] for point in waypoints]
+                line, = self.ax.plot(
+                    xs, ys, "--", color=colors[index % len(colors)], linewidth=1.6,
+                    alpha=0.7, zorder=40,
+                )
+                self.box_artists.append(line)
+                state = next(
+                    (item for item in self.parallel_robot_states
+                     if item["replay"].get("id") == replay_path.get("id")),
+                    None,
+                )
+                if state is None:
+                    px, py = waypoints[0]
+                else:
+                    px, py = state["x"], state["y"]
+                robot = self.ax.scatter(
+                    [px], [py], s=55, color=colors[index % len(colors)], edgecolors="white",
+                    linewidths=0.5, zorder=55,
+                )
+                self.box_artists.append(robot)
+            return
+
         path = DEFAULT_PATHS.get(
             self.current_path_name
         )
@@ -1054,6 +1440,52 @@ class MVPViewer(FigureCanvasQTAgg):
 
             self.box_artists.append(target)
 
+    def draw_reference_paths(self):
+        """Overlay all saved reference routes; the editable route is highlighted."""
+        if not self.show_reference_paths:
+            return
+        reference_paths = load_reference_paths()
+        if self.reference_path_edit_mode and self.reference_path_edit_name:
+            reference_paths = dict(reference_paths)
+            reference_paths[self.reference_path_edit_name] = {
+                "waypoints": self.reference_path_edit_waypoints,
+            }
+        for name, definition in reference_paths.items():
+            waypoints = definition.get("waypoints", [])
+            if len(waypoints) < 2:
+                continue
+            editing = name == self.reference_path_edit_name
+            xs = [point[0] for point in waypoints]
+            ys = [point[1] for point in waypoints]
+            line, = self.ax.plot(
+                xs, ys, "-", color="yellow" if editing else "white",
+                linewidth=3.0 if editing else 1.3,
+                alpha=0.95 if editing else 0.45, zorder=46 if editing else 39,
+            )
+            self.box_artists.append(line)
+            label = self.ax.text(
+                xs[0], ys[0], name, color="yellow" if editing else "white",
+                fontsize=7, weight="bold" if editing else "normal", zorder=47,
+            )
+            self.box_artists.append(label)
+            if editing:
+                points = self.ax.scatter(xs, ys, s=55, c="red", zorder=48)
+                self.box_artists.append(points)
+
+    @staticmethod
+    def point_on_replay_path(waypoints, distance):
+        """Nominal position for an independently executing replay AMR."""
+        remaining = max(0.0, distance)
+        for start, end in zip(waypoints, waypoints[1:]):
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            length = math.hypot(dx, dy)
+            if length <= 1e-9:
+                continue
+            if remaining <= length:
+                return start[0] + dx * remaining / length, start[1] + dy * remaining / length
+            remaining -= length
+        return waypoints[-1][0], waypoints[-1][1]
+
     def draw_entry_points(self):
 
         for artist in self.entry_artists:
@@ -1109,6 +1541,24 @@ class MVPViewer(FigureCanvasQTAgg):
             return
 
         if event.xdata is None or event.ydata is None:
+            return
+
+        if self.reference_path_edit_mode:
+            if event.button == 1:
+                self.reference_path_edit_waypoints.append(
+                    [float(event.xdata), float(event.ydata)]
+                )
+            elif event.button == 3 and self.reference_path_edit_waypoints:
+                px, py = float(event.xdata), float(event.ydata)
+                nearest = min(
+                    range(len(self.reference_path_edit_waypoints)),
+                    key=lambda index: (
+                        (self.reference_path_edit_waypoints[index][0] - px) ** 2
+                        + (self.reference_path_edit_waypoints[index][1] - py) ** 2
+                    ),
+                )
+                self.reference_path_edit_waypoints.pop(nearest)
+            self.update_frame(self.frame_idx)
             return
 
         if self.path_edit_mode:
@@ -1170,10 +1620,13 @@ class MVPViewer(FigureCanvasQTAgg):
         self.agent_x = float(event.xdata)
         self.agent_y = float(event.ydata)
 
-        self.vehicle_dot.set_data(
-            [self.agent_x],
-            [self.agent_y]
-        )
+        if SCENARIO_ALL_PATHS:
+            self.vehicle_dot.set_data([], [])
+        else:
+            self.vehicle_dot.set_data(
+                [self.agent_x],
+                [self.agent_y]
+            )
 
         self.draw_idle()
 
@@ -1239,9 +1692,96 @@ class MVPViewer(FigureCanvasQTAgg):
     # Agent movement
     # ==================================================
 
+    def head_on_forklift_present(self, frame):
+        """Detect a close forklift moving against the AMR's route heading."""
+        path = DEFAULT_PATHS.get(self.current_path_name)
+        if path is None or self.current_waypoint_idx >= len(path.waypoints):
+            return False
+        tx, ty = path.waypoints[self.current_waypoint_idx]
+        hx, hy = tx - self.agent_x, ty - self.agent_y
+        heading_norm = math.hypot(hx, hy)
+        if heading_norm < 1e-6:
+            return False
+        hx, hy = hx / heading_norm, hy / heading_norm
+        for obj in frame["objects"]:
+            polygon = obj.get("polygon", [])
+            if len(polygon) < 3:
+                continue
+            cx = sum(point[0] for point in polygon) / len(polygon)
+            cy = sum(point[1] for point in polygon) / len(polygon)
+            dx, dy = cx - self.agent_x, cy - self.agent_y
+            forward = dx * hx + dy * hy
+            if not 0 < forward <= 120:
+                continue
+            vx, vy = self.observed_pixel_velocity(obj)
+            velocity_norm = math.hypot(vx, vy)
+            if velocity_norm < 5.0:
+                continue
+            # Dot <= -0.5 means the forklift approaches from the opposite
+            # direction within 60 degrees of a direct head-on encounter.
+            if (vx / velocity_norm) * hx + (vy / velocity_norm) * hy <= -0.5:
+                return True
+        return False
+
+    def begin_safe_parking(self):
+        if self.safe_parking_active or len(ROBOT_OPERATING_AREA_POINTS) < 3:
+            return
+        operating_area = Polygon(ROBOT_OPERATING_AREA_POINTS)
+        _, border = nearest_points(Point(self.agent_x, self.agent_y), operating_area.boundary)
+        self.safe_parking_target = (float(border.x), float(border.y))
+        self.safe_parking_active = True
+        self.safe_parking_arrived = Point(self.agent_x, self.agent_y).distance(border) <= 3.0
+        self.safe_parking_clear_frames = 0
+
+    def update_safe_parking(self):
+        """Drive directly to the nearest area boundary, then hold safely."""
+        if not self.safe_parking_active or self.safe_parking_target is None:
+            return False
+        if self.safe_parking_arrived:
+            return True
+        tx, ty = self.safe_parking_target
+        dx, dy = tx - self.agent_x, ty - self.agent_y
+        distance = math.hypot(dx, dy)
+        if distance <= 3.0:
+            self.agent_x, self.agent_y = tx, ty
+            self.safe_parking_arrived = True
+            return True
+        path = DEFAULT_PATHS.get(self.current_path_name)
+        speed = path.speed * self.agent_speed_factor if path else 2.0
+        step = min(speed, distance)
+        self.agent_x += dx / distance * step
+        self.agent_y += dy / distance * step
+        return True
+
+    def resume_from_safe_parking(self):
+        path = DEFAULT_PATHS.get(self.current_path_name)
+        if path and path.waypoints:
+            self.current_waypoint_idx = min(
+                range(len(path.waypoints)),
+                key=lambda index: math.hypot(
+                    path.waypoints[index][0] - self.agent_x,
+                    path.waypoints[index][1] - self.agent_y,
+                ),
+            )
+            if self.current_waypoint_idx == 0:
+                self.current_waypoint_idx = 1
+        self.safe_parking_active = False
+        self.safe_parking_arrived = False
+        self.safe_parking_target = None
+        self.safe_parking_clear_frames = 0
+
     def update_agent(self):
 
         if self.dragging:
+            return
+
+        if self.update_safe_parking():
+            return
+
+        # STOP is immediate. A YIELD instead lets the AMR close up to the
+        # intersection boundary, then holds there rather than stopping far
+        # upstream when a forklift is approaching the intersection.
+        if self.decision_action == "STOP":
             return
 
         path = DEFAULT_PATHS.get(
@@ -1278,6 +1818,20 @@ class MVPViewer(FigureCanvasQTAgg):
             path.speed *
             self.agent_speed_factor
         )
+
+        if self.decision_action == "SLOW":
+            speed *= 0.5
+
+        if self.decision_action == "CLEAR_INTERSECTION":
+            speed *= 1.5
+
+        if self.decision_action == "YIELD" and len(INTERSECTION_POINTS) >= 3:
+            distance_to_entry = Point(self.agent_x, self.agent_y).distance(
+                Polygon(INTERSECTION_POINTS)
+            )
+            if distance_to_entry <= 3.0:
+                return
+            speed = min(speed, max(0.0, distance_to_entry - 3.0))
 
         #
         # consume full motion budget
@@ -1327,6 +1881,101 @@ class MVPViewer(FigureCanvasQTAgg):
             ) * remaining
 
             break
+
+    def reset_parallel_agents(self):
+        """Reset one independent supervisor/robot state per selected route."""
+        self.parallel_robot_states = []
+        for replay_path in SCENARIO_ALL_PATHS:
+            waypoints = [tuple(point) for point in replay_path.get("robot_path", [])]
+            if not waypoints:
+                continue
+            self.parallel_robot_states.append({
+                "replay": replay_path,
+                "waypoints": waypoints,
+                "speed": float(replay_path.get("robot_speed_px_per_frame", 2.0)),
+                "x": float(waypoints[0][0]),
+                "y": float(waypoints[0][1]),
+                "waypoint_idx": 1,
+                "decision_action": "GO",
+                "completed": False,
+            })
+        self.parallel_last_frame = None
+
+    def update_parallel_agents(self, target_frame):
+        """Run each displayed route through the same per-frame supervisor loop.
+
+        The viewer's normal single-robot update uses ``update_agent`` followed
+        by ``evaluate_scene_risk``.  This method temporarily installs each
+        independent state and calls those exact methods, so parallel markers
+        yield, stop and clear just as they do when selected individually.
+        """
+        if not SCENARIO_ALL_PATHS:
+            return
+        if not self.parallel_robot_states:
+            self.reset_parallel_agents()
+        # Cached behavior makes parallel playback a drawing operation rather
+        # than re-running ten supervisor simulations on every GUI frame.
+        if self.use_precomputed_behavior and all(
+            state["replay"].get("precomputed_behavior", {}).get("positions")
+            for state in self.parallel_robot_states
+        ):
+            for state in self.parallel_robot_states:
+                cached = state["replay"]["precomputed_behavior"]
+                # All paths in a window share their start frame but can have
+                # different end frames.  Once a shorter replay reaches its
+                # final cached state, hold that AMR at its goal instead of
+                # falling back to live simulation (which starts it again).
+                cache_index = min(target_frame, len(cached["positions"]) - 1)
+                state["x"], state["y"] = cached["positions"][cache_index]
+                state["decision_action"] = cached["actions"][cache_index]
+                state["completed"] = cache_index == len(cached["positions"]) - 1
+            self.parallel_last_frame = target_frame
+            return
+        if self.parallel_last_frame is None or target_frame != self.parallel_last_frame + 1:
+            self.reset_parallel_agents()
+            frame_range = range(0, target_frame + 1)
+        else:
+            frame_range = (target_frame,)
+
+        saved = (
+            self.agent_x, self.agent_y, self.current_waypoint_idx,
+            self.current_path_name, self.decision_action, self.frame_idx,
+        )
+        temporary_name = "__parallel_replay_path__"
+        temporary_path = RobotPath(temporary_name)
+        DEFAULT_PATHS[temporary_name] = temporary_path
+        try:
+            for frame_index in frame_range:
+                self.frame_idx = frame_index
+                source_frame = tracks[frame_index]
+                self.current_timestamp = source_frame["timestamp"]
+                for state in self.parallel_robot_states:
+                    # Unlike an editable live path, a replay route has a
+                    # terminal goal.  Do not let ``update_agent`` interpret
+                    # an exhausted waypoint index as a request to snap back
+                    # to the route start.
+                    if state["completed"]:
+                        continue
+                    temporary_path.waypoints = state["waypoints"]
+                    temporary_path.speed = state["speed"]
+                    self.current_path_name = temporary_name
+                    self.agent_x, self.agent_y = state["x"], state["y"]
+                    self.current_waypoint_idx = state["waypoint_idx"]
+                    self.decision_action = state["decision_action"]
+                    self.update_agent()
+                    state["x"], state["y"] = self.agent_x, self.agent_y
+                    state["waypoint_idx"] = self.current_waypoint_idx
+                    self.evaluate_scene_risk(source_frame)
+                    state["decision_action"] = self.decision_action
+                    if state["waypoint_idx"] >= len(state["waypoints"]):
+                        state["completed"] = True
+        finally:
+            DEFAULT_PATHS.pop(temporary_name, None)
+            (
+                self.agent_x, self.agent_y, self.current_waypoint_idx,
+                self.current_path_name, self.decision_action, self.frame_idx,
+            ) = saved
+        self.parallel_last_frame = target_frame
     # ==================================================
     # Main frame update
     # ==================================================
@@ -1349,7 +1998,13 @@ class MVPViewer(FigureCanvasQTAgg):
 
         self.draw_objects(frame)
 
-        self.update_agent()
+        cached_behavior = SCENARIO_REPLAY.get("precomputed_behavior", {}) if SCENARIO_REPLAY else {}
+        if self.use_precomputed_behavior and len(cached_behavior.get("positions", [])) > idx:
+            self.agent_x, self.agent_y = cached_behavior["positions"][idx]
+            self.decision_action = cached_behavior["actions"][idx]
+        else:
+            self.update_agent()
+        self.update_parallel_agents(idx)
 
         self.vehicle_dot.set_data(
             [self.agent_x],
@@ -1371,6 +2026,8 @@ class MVPViewer(FigureCanvasQTAgg):
         self.draw_active_trajectory()
 
         self.draw_robot_path()
+
+        self.draw_reference_paths()
 
         self.draw_idle()
 
@@ -1518,6 +2175,16 @@ class MVPViewer(FigureCanvasQTAgg):
                 worst_score = score
 
                 self.alert_ood = result
+
+        # A replay may explicitly contain an OOD override. Recorded-data
+        # replays omit it and therefore retain the original OOD measurement.
+        replay_frame = SCENARIO_FRAME_META.get(int(self.current_timestamp))
+        if replay_frame is not None and "ood" in replay_frame:
+            replay_ood = replay_frame.get("ood", {})
+            self.alert_ood = (
+                float(replay_ood.get("score", 0.0)),
+                bool(replay_ood.get("flag", False)),
+            )
 
         #
         # collision
@@ -1671,6 +2338,7 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self.next_frame)
+        self.replay_finished = False
 
         # --- Controls
         self.play_btn = QPushButton("▶ Play")
@@ -1683,6 +2351,30 @@ class MainWindow(QMainWindow):
         self.path_select = QComboBox()
         for name in DEFAULT_PATHS:
             self.path_select.addItem(name) 
+        self.scenario_select = None
+        self.scenario_window_select = None
+        self.scenario_path_select = None
+        self.scenario_catalog = {}
+        self.load_scenario_btn = None
+        if SCENARIO_REPLAY_FILE:
+            instances = load_json_file(repo_path(SCENARIO_REPLAY_FILE)).get("instances", [])
+            for instance in instances:
+                window_id = instance.get("window_id", instance.get("id"))
+                self.scenario_catalog.setdefault(window_id, []).append(instance)
+            self.scenario_window_select = QComboBox()
+            self.scenario_path_select = QComboBox()
+            for window_id in sorted(self.scenario_catalog):
+                first = self.scenario_catalog[window_id][0]
+                label = "{} — forklift {}".format(
+                    window_id, first.get("focus_track_id", "?")
+                )
+                self.scenario_window_select.addItem(label, window_id)
+            active_window = SCENARIO_REPLAY.get("window_id", SCENARIO_REPLAY.get("id"))
+            selected_index = self.scenario_window_select.findData(active_window)
+            if selected_index >= 0:
+                self.scenario_window_select.setCurrentIndex(selected_index)
+            self.populate_scenario_paths()
+            self.load_scenario_btn = QPushButton("Load Scenario")
         self.slider.setRange(0, NUM_FRAMES-1)
         self.label_frame = QLabel("Frame: 0")
 
@@ -1725,6 +2417,15 @@ class MainWindow(QMainWindow):
             "10x"
         ])
         self.speed_select.setCurrentText("1x")
+        self.precomputed_playback_check = QCheckBox("Use precomputed replay behavior")
+        self.precomputed_playback_check.setChecked(True)
+
+        self.show_reference_paths_check = QCheckBox("Show reference paths")
+        self.reference_path_select = QComboBox()
+        self.new_reference_path_btn = QPushButton("New Reference Path")
+        self.edit_reference_path_btn = QPushButton("Edit Reference Path")
+        self.save_reference_path_btn = QPushButton("Save Reference Path")
+        self.refresh_reference_path_combo()
 
        
 
@@ -1739,6 +2440,14 @@ class MainWindow(QMainWindow):
         ctrl.addWidget(self.reset_btn)
         ctrl.addWidget(self.label_frame)
         ctrl.addWidget(self.slider)
+        ctrl.addWidget(self.precomputed_playback_check)
+
+        if self.scenario_window_select is not None:
+            ctrl.addWidget(QLabel("Recorded Time Window"))
+            ctrl.addWidget(self.scenario_window_select)
+            ctrl.addWidget(QLabel("Robot Path"))
+            ctrl.addWidget(self.scenario_path_select)
+            ctrl.addWidget(self.load_scenario_btn)
 
         # ==================================================
         # Path
@@ -1753,6 +2462,13 @@ class MainWindow(QMainWindow):
 
         ctrl.addWidget(QLabel("AMR Speed"))
         ctrl.addWidget(self.speed_select)
+
+        ctrl.addWidget(QLabel("Robot Reference Paths"))
+        ctrl.addWidget(self.show_reference_paths_check)
+        ctrl.addWidget(self.reference_path_select)
+        ctrl.addWidget(self.new_reference_path_btn)
+        ctrl.addWidget(self.edit_reference_path_btn)
+        ctrl.addWidget(self.save_reference_path_btn)
 
         # ==================================================
         # Forklift Selection
@@ -1822,12 +2538,158 @@ class MainWindow(QMainWindow):
         self.reset_btn.clicked.connect(self.reset)
         self.slider.valueChanged.connect(self.seek)
         self.speed_select.currentTextChanged.connect(self.change_speed)    
+        self.precomputed_playback_check.toggled.connect(self.toggle_precomputed_playback)
         self.object_select.currentTextChanged.connect(self.change_object)        
         self.path_select.currentTextChanged.connect(self.change_path)
         self.edit_path_btn.clicked.connect(self.toggle_path_edit)
         self.new_path_btn.clicked.connect(self.create_new_path)
         self.save_path_btn.clicked.connect(self.save_path_library)
         self.load_path_btn.clicked.connect(self.load_path_library)
+        self.show_reference_paths_check.toggled.connect(self.toggle_reference_paths)
+        self.new_reference_path_btn.clicked.connect(self.create_reference_path)
+        self.edit_reference_path_btn.clicked.connect(self.edit_reference_path)
+        self.save_reference_path_btn.clicked.connect(self.save_reference_path)
+        if self.load_scenario_btn is not None:
+            self.load_scenario_btn.clicked.connect(self.load_selected_scenario)
+            self.scenario_window_select.currentIndexChanged.connect(self.populate_scenario_paths)
+
+    def toggle_precomputed_playback(self, checked):
+        self.viewer.use_precomputed_behavior = checked
+        self.viewer.reset_parallel_agents()
+        self.viewer.update_frame(self.viewer.frame_idx)
+
+    def load_selected_scenario(self):
+        window_id = self.scenario_window_select.currentData()
+        path_value = self.scenario_path_select.currentData()
+        if not window_id or not path_value:
+            return
+        show_all_paths = path_value == "__all__"
+        if show_all_paths:
+            scenario_id = self.scenario_catalog[window_id][0].get("id")
+        else:
+            scenario_id = path_value
+        self.timer.stop()
+        activate_scenario_replay(str(scenario_id), show_all_paths=show_all_paths)
+        self.replay_finished = False
+        self.play_btn.setText("▶ Play")
+        self.viewer.current_path_name = "Path_1"
+        self.viewer.active_track_id = int(SCENARIO_REPLAY["focus_track_id"])
+        self.viewer.frame_idx = 0
+        self.viewer.decision_action = "GO"
+        self.viewer.intersection_reason = None
+        self.viewer.safe_parking_active = False
+        self.viewer.safe_parking_arrived = False
+        self.viewer.safe_parking_target = None
+        self.viewer.safe_parking_clear_frames = 0
+        self.viewer.snap_agent_to_active_path()
+        self.viewer.reset_parallel_agents()
+        self.slider.blockSignals(True)
+        self.slider.setRange(0, NUM_FRAMES - 1)
+        self.slider.setValue(0)
+        self.slider.blockSignals(False)
+        self.viewer.update_frame(0)
+        self.refresh_object_combo()
+        self.refresh_info_panel()
+        self.label_frame.setText(
+            "Frame: 0 | TS: {}".format(self.viewer.current_timestamp)
+        )
+        self.statusBar().showMessage(
+            "Loaded {}{}".format(
+                window_id, " — all robot paths" if show_all_paths else ""
+            )
+        )
+
+    def populate_scenario_paths(self):
+        """Populate the route selector for the currently selected recording."""
+        if self.scenario_window_select is None:
+            return
+        window_id = self.scenario_window_select.currentData()
+        variants = self.scenario_catalog.get(window_id, [])
+        self.scenario_path_select.blockSignals(True)
+        self.scenario_path_select.clear()
+        if variants:
+            self.scenario_path_select.addItem("All 10 robot paths (parallel)", "__all__")
+            for instance in variants:
+                self.scenario_path_select.addItem(
+                    instance.get("robot_path_label", instance.get("id", "Robot path")),
+                    instance.get("id"),
+                )
+        self.scenario_path_select.blockSignals(False)
+
+    def refresh_reference_path_combo(self, selected_name=None):
+        reference_paths = load_reference_paths()
+        self.reference_path_select.blockSignals(True)
+        self.reference_path_select.clear()
+        for name in sorted(reference_paths, key=reference_path_sort_key):
+            self.reference_path_select.addItem(name)
+        if selected_name:
+            index = self.reference_path_select.findText(selected_name)
+            if index >= 0:
+                self.reference_path_select.setCurrentIndex(index)
+        self.reference_path_select.blockSignals(False)
+
+    def toggle_reference_paths(self, checked):
+        self.viewer.show_reference_paths = checked
+        self.viewer.update_frame(self.viewer.frame_idx)
+
+    def create_reference_path(self):
+        reference_paths = load_reference_paths()
+        number = 1
+        while "Path_{}".format(number) in reference_paths:
+            number += 1
+        name = "Path_{}".format(number)
+        self.viewer.reference_path_edit_name = name
+        self.viewer.reference_path_edit_waypoints = []
+        self.viewer.reference_path_edit_mode = True
+        self.viewer.show_reference_paths = True
+        self.show_reference_paths_check.setChecked(True)
+        self.refresh_reference_path_combo(name)
+        self.edit_reference_path_btn.setText("Editing Reference Path")
+        self.statusBar().showMessage(
+            "Drawing {}: left-click adds a waypoint; right-click removes the nearest one.".format(name)
+        )
+        self.viewer.update_frame(self.viewer.frame_idx)
+
+    def edit_reference_path(self):
+        name = self.reference_path_select.currentText()
+        reference_paths = load_reference_paths()
+        definition = reference_paths.get(name)
+        if not definition:
+            return
+        self.viewer.reference_path_edit_name = name
+        self.viewer.reference_path_edit_waypoints = [
+            [float(x), float(y)] for x, y in definition.get("waypoints", [])
+        ]
+        self.viewer.reference_path_edit_mode = True
+        self.viewer.show_reference_paths = True
+        self.show_reference_paths_check.setChecked(True)
+        self.edit_reference_path_btn.setText("Editing Reference Path")
+        self.statusBar().showMessage(
+            "Editing {}: left-click adds a waypoint; right-click removes the nearest one.".format(name)
+        )
+        self.viewer.update_frame(self.viewer.frame_idx)
+
+    def save_reference_path(self):
+        name = self.viewer.reference_path_edit_name
+        waypoints = self.viewer.reference_path_edit_waypoints
+        if not name or len(waypoints) < 2:
+            self.statusBar().showMessage("A reference path needs at least two waypoints before saving.")
+            return
+        reference_paths = load_reference_paths()
+        existing = reference_paths.get(name, {})
+        reference_paths[name] = {
+            "speed": float(existing.get("speed", 2.0)),
+            "start_frame": existing.get("start_frame", 0),
+            "end_frame": existing.get("end_frame"),
+            "associated_track": existing.get("associated_track"),
+            "waypoints": waypoints,
+        }
+        save_reference_paths(reference_paths)
+        self.viewer.reference_path_edit_mode = False
+        self.refresh_reference_path_combo(name)
+        self.edit_reference_path_btn.setText("Edit Reference Path")
+        self.statusBar().showMessage("Saved {} to {}".format(name, REFERENCE_PATHS_PATH.name))
+        self.viewer.update_frame(self.viewer.frame_idx)
 
     def save_path_library(self):
         save_paths()
@@ -1949,6 +2811,17 @@ class MainWindow(QMainWindow):
         self.viewer.draw_idle()
 
     def next_frame(self):
+
+        # Unlike the full recording, an instance replay is finite. Freeze on
+        # its last frame rather than wrapping into an invalid source index.
+        if SCENARIO_REPLAY and self.viewer.frame_idx >= NUM_FRAMES - 1:
+            self.timer.stop()
+            self.replay_finished = True
+            self.play_btn.setText("↻ Replay")
+            self.statusBar().showMessage(
+                "Replay complete — press Replay or Reset to start from frame 0."
+            )
+            return
 
         current_track = (
             self.viewer.active_track_id
@@ -2239,6 +3112,18 @@ class MainWindow(QMainWindow):
 
         selected = self.viewer.active_track_id
 
+        replay_focus_id = (
+            int(SCENARIO_REPLAY["focus_track_id"])
+            if SCENARIO_REPLAY and SCENARIO_REPLAY.get("focus_track_id") is not None
+            else None
+        )
+        if replay_focus_id is not None:
+            # The focus track may be absent in a few early recorded frames.
+            # Retain its identity and select it automatically as soon as its
+            # recorded detection appears; never substitute an unrelated track.
+            selected = replay_focus_id
+            self.viewer.active_track_id = replay_focus_id
+
         self.object_select.blockSignals(True)
 
         self.object_select.clear()
@@ -2256,6 +3141,10 @@ class MainWindow(QMainWindow):
             if idx >= 0:
                 self.object_select.setCurrentIndex(idx)
 
+        elif replay_focus_id is not None:
+
+            self.object_select.setCurrentIndex(-1)
+
         elif visible:
 
             selected = visible[0]
@@ -2272,11 +3161,18 @@ class MainWindow(QMainWindow):
             self.timer.stop()
             self.play_btn.setText("▶ Play")
         else:
+            if SCENARIO_REPLAY and (
+                self.replay_finished or self.viewer.frame_idx >= NUM_FRAMES - 1
+            ):
+                self.reset()
+            self.replay_finished = False
             self.timer.start()
             self.play_btn.setText("⏸ Pause")
 
     def reset(self):
         self.timer.stop()
+        self.replay_finished = False
+        self.play_btn.setText("▶ Play")
         path = DEFAULT_PATHS[
             self.viewer.current_path_name
         ]
@@ -2284,6 +3180,8 @@ class MainWindow(QMainWindow):
             self.viewer.agent_x = path.waypoints[0][0]
             self.viewer.agent_y = path.waypoints[0][1]
             self.viewer.current_waypoint_idx = 1
+        self.viewer.decision_action = "GO"
+        self.viewer.intersection_reason = None
         self.viewer.frame_idx = 0
         self.viewer.update_frame(0)
 
