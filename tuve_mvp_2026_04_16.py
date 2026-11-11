@@ -6,8 +6,6 @@ import sys, os, json, cv2, pickle
 import numpy as np
 import math
 from pathlib import Path
-from typing import Tuple
-from shapely.geometry import Point, Polygon
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
@@ -74,9 +72,13 @@ OOD_CACHE = {}
 MODEL = MLModel.load(MODEL_PATH)
 ENTRY_ELLIPSES = MODEL.entry_ellipses
 
+
 # ==========================================================
 # LOAD STATIC DATA
 # ==========================================================
+CACHE_FILE = "tuve_cache.pkl"
+
+
 
 mask_lookup = {}
 
@@ -109,6 +111,91 @@ t = np.asarray(occ_proj["t"], dtype=np.float64).reshape(3, 1)
 # DATA ADAPTORS 
 # ==========================================================
 
+def build_track_cache(tracks):
+
+    track_unc = {}
+    track_hist = {}
+    bbox_stats = {}
+
+    for frame_idx, frame in enumerate(tracks):
+
+        ts = frame["timestamp"]
+
+        for obj in frame["objects"]:
+
+            tid = obj["track_id"]
+
+            wx, wy = obj["center_world"]
+            cx, cy = world_to_occupancy(wx, wy)
+
+            track_hist.setdefault(
+                tid,
+                []
+            ).append(
+                (
+                    frame_idx,
+                    cx,
+                    cy
+                )
+            )
+
+            poly = np.asarray(
+                obj["polygon"],
+                dtype=float
+            )
+
+            if len(poly) < 3:
+                continue
+
+            center = poly.mean(0)
+
+            track_unc.setdefault(
+                tid,
+                []
+            ).append({
+                "center": center,
+                "area": cv2.contourArea(poly.astype(np.float32)),
+                "frame": ts
+            })
+
+            ang = np.deg2rad(obj["angle"])
+
+            Rm = np.array([
+                [np.cos(ang), np.sin(ang)],
+                [-np.sin(ang), np.cos(ang)]
+            ])
+
+            local = (poly-center) @ Rm.T
+
+            bbox_stats.setdefault(
+                tid,
+                []
+            ).append(
+                (
+                    max(
+                        0.0,
+                        (
+                            np.ptp(local[:,0])
+                            -
+                            float(obj["bbox_length"])
+                        )
+                    ),
+                    max(
+                        0.0,
+                        (
+                            np.ptp(local[:,1])
+                            -
+                            float(obj["bbox_width"])
+                        )
+                    )
+                )
+            )
+
+    return (
+        track_unc,
+        track_hist,
+        bbox_stats
+    )
 
 def load_tracks_auto(path):
     with open(path, "r") as f:
@@ -187,87 +274,43 @@ def estimate_track_uncertainty(
 ):
 
     hist = TRACK_UNCERTAINTY.get(
-        track_id,
-        []
+        track_id
     )
 
-    if len(hist) < 4:
+    if not hist or len(hist) < 3:
         return 0.0
 
-    indexed = TRACK_HISTORY.get(
-        track_id,
-        []
+    recent = hist[-5:]
+
+    centers = np.asarray(
+        [r["center"] for r in recent]
     )
 
-    current_idx = None
-
-    for i, h in enumerate(indexed):
-
-        if h[0] == frame_idx:
-
-            current_idx = i
-            break
-
-    if current_idx is None:
-        return 1.0
-
-    start = max(
-        0,
-        current_idx - 4
-    )
-
-    end = current_idx + 1
-
-    recent = hist[start:end]
-
-    if len(recent) < 3:
-        return 0.0
-
-    centers = np.asarray([
-        h["center"]
-        for h in recent
-    ])
-
-    areas = np.asarray([
-        h["area"]
-        for h in recent
-    ])
-
-    pos_var = np.linalg.norm(
-        np.std(
-            centers,
-            axis=0
-        )
-    )
-
-    area_cv = (
-        np.std(areas)
-        /
-        (
-            np.mean(areas)
-            + 1e-6
-        )
-    )
-
-    unc = (
-        0.7 *
-        min(
-            1.0,
-            pos_var / 15.0
-        )
-        +
-        0.3 *
-        min(
-            1.0,
-            area_cv
-        )
+    areas = np.asarray(
+        [r["area"] for r in recent]
     )
 
     return float(
         np.clip(
-            unc,
-            0.0,
-            1.0
+            0.7 *
+            min(
+                1.0,
+                np.linalg.norm(
+                    centers.std(0)
+                ) / 15
+            )
+            +
+            0.3 *
+            min(
+                1.0,
+                areas.std()
+                /
+                (
+                    areas.mean()+1e-6
+                )
+            ),
+            0,
+            1
         )
     )
 # ==========================================================
@@ -317,8 +360,10 @@ def load_ood(cam_id):
 
     cam_id = str(cam_id)
 
-    if cam_id in OOD_CACHE:
-        return OOD_CACHE[cam_id]
+    cached = OOD_CACHE.get(cam_id)
+
+    if cached is not None:
+        return cached
 
     npz = (
         Path(OOD_ROOT)
@@ -328,12 +373,17 @@ def load_ood(cam_id):
 
     if not npz.exists():
 
-        OOD_CACHE[cam_id] = (
+        result = (
             {},
-            []
+            np.empty(
+                0,
+                dtype=np.int64
+            )
         )
 
-        return OOD_CACHE[cam_id]
+        OOD_CACHE[cam_id] = result
+
+        return result
 
     dtype = np.dtype([
         ("id", np.uint64),
@@ -346,83 +396,94 @@ def load_ood(cam_id):
         dtype=dtype
     )
 
+    scores = {
+        int(i): (
+            float(s),
+            bool(p)
+        )
+        for i, s, p in arr
+    }
+
+    keys = arr["id"].astype(
+        np.int64
+    )
+
     result = (
-        {
-            str(i): (
-                float(s),
-                bool(p)
-            )
-            for i, s, p in arr
-        },
-        list(map(str, arr["id"]))
+        scores,
+        keys
     )
 
     OOD_CACHE[cam_id] = result
 
     return result
 
-
 # ==========================================================
 # DATA LOAD
 # ==========================================================
 
-tracks, uncertainties, data_mode = load_tracks_auto(SAVE_PATH)
+if Path(CACHE_FILE).exists():
 
-# ==========================================================
-# TRACK UNCERTAINTY HISTORY
-# ==========================================================
+    with open(CACHE_FILE, "rb") as f:
+        cache = pickle.load(f)
 
-TRACK_UNCERTAINTY = {}
+    tracks = cache["tracks"]
+    TRACK_HISTORY = cache["history"]
+    TRACK_UNCERTAINTY = cache["unc"]
+    TRACK_BBOX_STATS = cache["bbox"]
 
-for frame in tracks:
+else:
 
-    for obj in frame["objects"]:
+    tracks, uncertainties, data_mode = (
+        load_tracks_auto(SAVE_PATH)
+    )
 
-        tid = obj["track_id"]
+    (
+        TRACK_UNCERTAINTY,
+        TRACK_HISTORY,
+        TRACK_BBOX_STATS
+    ) = build_track_cache(tracks)
 
-        poly = np.asarray(
-            obj["polygon"],
-            dtype=np.float32
+    with open(CACHE_FILE, "wb") as f:
+
+        pickle.dump(
+            {
+                "tracks": tracks,
+                "history": TRACK_HISTORY,
+                "unc": TRACK_UNCERTAINTY,
+                "bbox": TRACK_BBOX_STATS
+            },
+            f
         )
 
-        if len(poly) < 3:
-            continue
-
-        center = np.mean(
-            poly,
-            axis=0
-        )
-
-        area = cv2.contourArea(
-            poly.astype(np.float32)
-        )
-
-        TRACK_UNCERTAINTY.setdefault(
-            tid,
-            []
-        ).append({
-
-            "center": center,
-
-            "area": area,
-
-            "frame": frame["timestamp"]
-        })
+TRACK_HISTORY_IDX = {
+    tid: np.asarray(
+        [h[0] for h in hist],
+        dtype=np.int32
+    )
+    for tid, hist in TRACK_HISTORY.items()
+}
 
 first_ts = tracks[0]["timestamp"]
+
 mask_file = mask_lookup.get(first_ts)
 
 if mask_file is None:
+
     raise RuntimeError(
         f"No BEV image for timestamp {first_ts}"
     )
+
 mask0 = cv2.imread(
-    os.path.join(MASK_FOLDER, mask_file),
+    os.path.join(
+        MASK_FOLDER,
+        mask_file
+    ),
     cv2.IMREAD_GRAYSCALE
 )
-H, W = mask0.shape
-NUM_FRAMES = len(tracks)
 
+H, W = mask0.shape
+
+NUM_FRAMES = len(tracks)
 
 # ==========================================================
 # LOAD PRECOMPUTED ROUTE + MANEUVER PREDICTIONS
@@ -450,32 +511,7 @@ for frame in pred_data:
 
     prediction_lookup[ts] = per_track
 
-# ==========================================================
-# PRECOMPUTED TRACK HISTORY
-# ==========================================================
 
-TRACK_HISTORY = {}
-
-for frame_idx, frame in enumerate(tracks):
-
-    for obj in frame["objects"]:
-        tid = obj["track_id"]
-        wx, wy = obj["center_world"]
-        cx, cy = world_to_occupancy(
-            wx,
-            wy
-        )
-
-        TRACK_HISTORY.setdefault(
-            tid,
-            []
-        ).append(
-            (
-                frame_idx,
-                cx,
-                cy
-            )
-        )
 TRACK_HISTORY_IDX = {}
 
 for tid, hist in TRACK_HISTORY.items():
@@ -487,67 +523,6 @@ for tid, hist in TRACK_HISTORY.items():
 # ==========================================================
 # BBOX UNCERTAINTY MODEL
 # ==========================================================
-
-TRACK_BBOX_STATS = {}
-
-for frame in tracks:
-
-    for obj in frame["objects"]:
-
-        tid = obj["track_id"]
-
-        poly = np.asarray(
-            obj["polygon"],
-            dtype=float
-        )
-
-        if len(poly) < 3:
-            continue
-
-        bw = float(obj["bbox_width"])
-        bl = float(obj["bbox_length"])
-
-        ang = np.deg2rad(
-            obj["angle"]
-        )
-
-        center = poly.mean(axis=0)
-
-        R = np.array([
-            [ np.cos(ang), np.sin(ang)],
-            [-np.sin(ang), np.cos(ang)]
-        ])
-
-        local = (
-            poly - center
-        ) @ R.T
-
-        poly_length = (
-            local[:,0].max()
-            - local[:,0].min()
-        )
-
-        poly_width = (
-            local[:,1].max()
-            - local[:,1].min()
-        )
-
-        dl = max(
-            0.0,
-            poly_length - bl
-        )
-
-        dw = max(
-            0.0,
-            poly_width - bw
-        )
-
-        TRACK_BBOX_STATS.setdefault(
-            tid,
-            []
-        ).append(
-            (dl, dw)
-        )
 
 def uncertainty_bbox(track_id):
 
@@ -814,7 +789,8 @@ class IntersectionOccupancySupervisor(
     name = "intersection_occupancy"
     category = "planning"
 
-    OCCUPANCY_WINDOW = 3.0
+    INTERSECTION_RADIUS = 50
+    OCC_TIME = 3.0
 
     def evaluate(self, scene):
 
@@ -826,8 +802,7 @@ class IntersectionOccupancySupervisor(
 
         if (
             viewer is None
-            or
-            center is None
+            or center is None
         ):
             return SupervisorResult(
                 name=self.name,
@@ -837,24 +812,29 @@ class IntersectionOccupancySupervisor(
                 flag=False
             )
 
-        robot_distance = np.linalg.norm(
-            np.array([
-                viewer.agent_x,
-                viewer.agent_y
-            ]) - np.asarray(center)
+        robot_speed = max(
+            0.5,
+            viewer.agent_speed_factor
         )
 
-        robot_arrival = (
+        robot_distance = np.linalg.norm(
+            np.array(
+                [
+                    viewer.agent_x,
+                    viewer.agent_y
+                ]
+            ) -
+            np.asarray(center)
+        )
+
+        robot_entry = (
             robot_distance /
-            max(
-                1.0,
-                viewer.agent_speed_factor
-            )
+            robot_speed
         )
 
         robot_exit = (
-            robot_arrival +
-            self.OCCUPANCY_WINDOW
+            robot_entry +
+            self.OCC_TIME
         )
 
         overlap_prob = 0.0
@@ -868,52 +848,62 @@ class IntersectionOccupancySupervisor(
             vx, vy = obj["velocity_world"]
 
             speed = max(
-                0.1,
+                0.2,
                 np.hypot(vx, vy)
             )
 
-            object_distance = np.linalg.norm(
-                np.array([cx, cy])
-                -
+            dist = np.linalg.norm(
+                np.array([cx, cy]) -
                 np.asarray(center)
             )
 
-            obj_arrival = (
-                object_distance / speed
-            )
+            entry = dist / speed
+            exit_ = entry + self.OCC_TIME
 
-            obj_exit = (
-                obj_arrival +
-                self.OCCUPANCY_WINDOW
-            )
-
-            overlap = (
-                max(
-                    robot_arrival,
-                    obj_arrival
-                )
-                <
-                min(
-                    robot_exit,
-                    obj_exit
-                )
+            overlap = max(
+                robot_entry,
+                entry
+            ) < min(
+                robot_exit,
+                exit_
             )
 
             if overlap:
+
+                amount = (
+                    min(
+                        robot_exit,
+                        exit_
+                    )
+                    -
+                    max(
+                        robot_entry,
+                        entry
+                    )
+                )
+
                 overlap_prob = max(
                     overlap_prob,
-                    0.85
+                    min(
+                        1.0,
+                        amount /
+                        self.OCC_TIME
+                    )
                 )
 
         return SupervisorResult(
             name=self.name,
             category=self.category,
-            score=overlap_prob,
-            confidence=1.0-overlap_prob,
-            flag=overlap_prob > 0.40,
+            score=float(overlap_prob),
+            confidence=float(
+                1.0-overlap_prob
+            ),
+            flag=(
+                overlap_prob > 0.4
+            ),
             details={
                 "overlap_probability":
-                    overlap_prob
+                float(overlap_prob)
             }
         )
 
@@ -923,8 +913,10 @@ class TrajectoryConflictSupervisor(Supervisor):
     category = "planning"
 
     HORIZON_SEC = 8.0
-    DT = 0.5
+    DT = 0.25
+
     SAFE_DISTANCE = 80.0
+    CRITICAL_DISTANCE = 40.0
 
     def evaluate(self, scene):
 
@@ -960,12 +952,15 @@ class TrajectoryConflictSupervisor(Supervisor):
             viewer.current_waypoint_idx
         ]
 
-        heading = np.array([
-            tx - viewer.agent_x,
-            ty - viewer.agent_y
-        ], dtype=float)
+        robot_heading = np.array(
+            [
+                tx - viewer.agent_x,
+                ty - viewer.agent_y
+            ],
+            dtype=float
+        )
 
-        norm = np.linalg.norm(heading)
+        norm = np.linalg.norm(robot_heading)
 
         if norm < 1e-6:
             return SupervisorResult(
@@ -976,14 +971,16 @@ class TrajectoryConflictSupervisor(Supervisor):
                 flag=False
             )
 
-        heading /= norm
+        robot_heading /= norm
 
         robot_speed = (
             path.speed *
             viewer.agent_speed_factor
         )
 
-        max_risk = 0.0
+        highest_risk = 0.0
+        conflict_time = None
+        avoid_side = "LEFT"
 
         for obj in scene.frame["objects"]:
 
@@ -999,43 +996,79 @@ class TrajectoryConflictSupervisor(Supervisor):
                 self.DT
             ):
 
-                robot_pos = np.array([
-                    viewer.agent_x,
-                    viewer.agent_y
-                ]) + heading * robot_speed * t
+                robot_pos = np.array(
+                    [
+                        viewer.agent_x,
+                        viewer.agent_y
+                    ]
+                ) + robot_heading * robot_speed * t
 
-                forklift_pos = np.array([
-                    cx + vx * t,
-                    cy + vy * t
-                ])
-
-                distance = np.linalg.norm(
-                    robot_pos - forklift_pos
+                forklift_pos = np.array(
+                    [
+                        cx + vx * t,
+                        cy + vy * t
+                    ]
                 )
 
-                risk = max(
-                    0.0,
-                    1.0 -
-                    distance /
-                    self.SAFE_DISTANCE
+                d = np.linalg.norm(
+                    robot_pos -
+                    forklift_pos
                 )
 
-                max_risk = max(
-                    max_risk,
-                    risk
-                )
+                if d < self.SAFE_DISTANCE:
+
+                    risk = np.clip(
+                        (
+                            self.SAFE_DISTANCE - d
+                        ) / (
+                            self.SAFE_DISTANCE -
+                            self.CRITICAL_DISTANCE
+                        ),
+                        0.0,
+                        1.0
+                    )
+
+                    if risk > highest_risk:
+
+                        highest_risk = risk
+                        conflict_time = t
+
+                        relative = (
+                            forklift_pos -
+                            robot_pos
+                        )
+
+                        cross = np.cross(
+                            robot_heading,
+                            relative
+                        )
+
+                        avoid_side = (
+                            "RIGHT"
+                            if cross > 0
+                            else "LEFT"
+                        )
 
         return SupervisorResult(
             name=self.name,
             category=self.category,
-            score=max_risk,
-            confidence=1.0-max_risk,
-            flag=max_risk > 0.50,
+            score=float(highest_risk),
+            confidence=float(
+                1.0 - highest_risk
+            ),
+            flag=(
+                highest_risk > 0.50
+            ),
             details={
                 "conflict_probability":
-                    max_risk
+                    float(highest_risk),
+                "time_to_conflict":
+                    conflict_time,
+                "avoid_side":
+                    avoid_side
             }
         )
+    
 # ==========================================================
 # ROBOT PATH LIBRARY
 # ==========================================================
@@ -1189,10 +1222,14 @@ class MVPViewer(FigureCanvasQTAgg):
         self.alert_collision = False
         self.alert_cam = None
         self.active_track_id = None
-
+        self.avoidance_active = False
+        self.avoidance_side = None
+        self.avoidance_offset = 40.0
+        self.current_lane_offset = 0.0
+        self.target_lane_offset = 0.0
         self.route_info = None
         self.mode_info = None
-
+        self.operator_speed_factor = 1.0
         self.track_ids_current = []
         self.trajectory_artist = None        
         self.current_traj_len = 0
@@ -1303,6 +1340,70 @@ class MVPViewer(FigureCanvasQTAgg):
             self.on_motion
         )
 
+    def update_avoidance_state(
+        self,
+        conflict_risk,
+        avoid_side="LEFT"
+    ):
+
+        ENTER_THRESHOLD = 0.75
+        EXIT_THRESHOLD  = 0.40
+
+        if (
+            not self.avoidance_active
+            and
+            conflict_risk > ENTER_THRESHOLD
+        ):
+
+            self.avoidance_active = True
+            self.avoidance_side = avoid_side
+
+        elif (
+            self.avoidance_active
+            and
+            conflict_risk < EXIT_THRESHOLD
+        ):
+
+            self.avoidance_active = False
+            self.avoidance_side = None
+
+        if self.avoidance_active:
+
+            sign = (
+                -1
+                if self.avoidance_side == "LEFT"
+                else 1
+            )
+
+            self.target_lane_offset = (
+                sign * self.avoidance_offset
+            )
+
+        else:
+
+            self.target_lane_offset = 0.0
+
+    def get_offset_target(
+        self,
+        tx,
+        ty
+    ):
+
+        dx = tx - self.agent_x
+        dy = ty - self.agent_y
+
+        dist = np.hypot(dx,dy)
+
+        if dist < 1e-6:
+            return tx,ty
+
+        nx = -dy / dist
+        ny =  dx / dist
+
+        return (
+            tx + nx * self.current_lane_offset,
+            ty + ny * self.current_lane_offset
+        )
 
     def log_evidence(self):
 
@@ -1351,328 +1452,186 @@ class MVPViewer(FigureCanvasQTAgg):
         })
 
     def compute_prediction_consistency(self):
-
-        route_score = 1.0
-        mode_score = 1.0
-
-        if len(self.route_history) >= 5:
-
-            latest = self.route_history[-1]
-
-            matches = sum(
-                r == latest
-                for r in self.route_history
+        def consistency(hist):
+            if len(hist) < 5:
+                return 1.0
+            latest = hist[-1]
+            return (
+                sum(
+                    x == latest
+                    for x in hist
+                )
+                /
+                len(hist)
             )
-
-            route_score = matches / len(self.route_history)
-
-        if len(self.mode_history) >= 5:
-
-            latest = self.mode_history[-1]
-
-            matches = sum(
-                m == latest
-                for m in self.mode_history
-            )
-
-            mode_score = matches / len(self.mode_history)
-
-        self.route_consistency = route_score
-        self.mode_consistency = mode_score
-
-        self.prediction_trust = (
-            0.5 * route_score +
-            0.5 * mode_score
+        self.route_consistency = consistency(
+            self.route_history
         )
-
+        self.mode_consistency = consistency(
+            self.mode_history
+        )
+        self.prediction_trust = (
+            self.route_consistency +
+            self.mode_consistency
+        ) * 0.5
         return self.prediction_trust
 
-    def evaluate_scene_risk(
-        self,
-        frame
-    ):
+    def evaluate_scene_risk(self, frame):
 
-        self.minimum_ttc = 999.0
-
-        objects = frame["objects"]
-
-        if self.active_track_id is not None:
-
-            objects = [
-
-                o for o in objects
-
-                if o["track_id"]
-                ==
-                self.active_track_id
-            ]
-
-        for obj in objects:
-
-            ttc = self.compute_ttc(
-                obj
-            )
-
-            if np.isfinite(ttc):
-
-                self.minimum_ttc = min(
-                    self.minimum_ttc,
-                    ttc
-                )
+        self.minimum_ttc = min(
+            (
+                self.compute_ttc(o)
+                for o in frame["objects"]
+                if self.active_track_id is None
+                or o["track_id"] == self.active_track_id
+            ),
+            default=np.inf
+        )
 
         scene = SceneContext(
-
-            timestamp=
-                self.current_timestamp,
-
-            frame_idx=
-                self.frame_idx,
-
-            active_track_id=
-                self.active_track_id,
-
-            frame=
-                frame,
-
-            route_prediction=
-                self.route_info,
-
-            maneuver_prediction=
-                self.mode_info,
-
-            ttc=
-                self.minimum_ttc,
-
+            timestamp=self.current_timestamp,
+            frame_idx=self.frame_idx,
+            active_track_id=self.active_track_id,
+            frame=frame,
+            route_prediction=self.route_info,
+            maneuver_prediction=self.mode_info,
+            ttc=self.minimum_ttc,
             extra={
-                "alert_ood":
-                    self.alert_ood,
-
-                "viewer":
-                    self,
-
-                "intersection_center":
-                    (
-                        400,
-                        300
-                    )
+                "alert_ood": self.alert_ood,
+                "viewer": self,
+                "intersection_center": (1000, 200)
             }
         )
 
         self.supervisor_results = (
-
-            self.supervisor_manager
-                .evaluate(scene)
+            self.supervisor_manager.evaluate(scene)
         )
 
         results = {
             r.name: r
             for r in self.supervisor_results
         }
-        intersection = results.get(
-            "intersection_occupancy"
-        )
 
-        intersection_risk = (
-            intersection.score
-            if intersection
-            else 0.0
-        )
-        ood = results.get(
-            "camera_ood"
-        )
+        ood = results.get("camera_ood")
+        track = results.get("track_uncertainty")
+        traj = results.get("trajectory_conflict")
+        intersection = results.get("intersection_occupancy")
 
-        track = results.get(
-            "track_uncertainty"
-        )
+        ood_score = getattr(ood, "score", 0.0)
+        track_score = getattr(track, "score", 0.0)
 
-        ood_score = (
-            ood.score
-            if ood else 0.0
-        )
-
-        ood_flag = (
-            ood.flag
-            if ood else False
-        )
-
-        track_unc = (
-            track.score
-            if track else 0.0
-        )
-
-        #
-        # Legacy trust
-        #
-        legacy_trust = (
+        self.current_trust = np.clip(
             1.0
-            - 0.2 * ood_score
-            - 0.3 * track_unc
-            - 0.4 * intersection_risk
-        )
-
-        if ood_flag:
-
-            legacy_trust -= 0.30
-
-        #
-        # Future trust
-        #
-        supervisor_trust = (
-            self.decision_engine
-            .compute_trust(
-                self.supervisor_results
-            )
-        )
-
-        #
-        # Phase 2
-        # Keep identical behavior
-        #
-        self.current_trust = float(
-
-            np.clip(
-                legacy_trust,
-                0.0,
-                1.0
-            )
-        )
-
-        #
-        # Available for debugging
-        #
-        self.future_trust = (
-            supervisor_trust
-        )
-
-        if ood_flag:
-
-            self.current_trust -= 0.30
-
-        self.current_trust = float(
-            np.clip(
-                self.current_trust,
-                0.0,
-                1.0
-            )
+            - 0.35 * ood_score
+            - 0.25 * track_score
+            - (0.30 if getattr(ood, "flag", False) else 0),
+            0.0,
+            1.0
         )
 
         if self.current_trust < 0.25:
-            if self.runtime_state != "NORMAL":
-
-                self.agent_speed_factor = min(
-                    self.agent_speed_factor,
-                    0.5
-                )
             self.runtime_state = "UNSAFE"
-
         elif self.current_trust < 0.50:
-
             self.runtime_state = "WARNING"
-
         elif self.current_trust < 0.80:
-
             self.runtime_state = "DEGRADED"
-
         else:
-
             self.runtime_state = "NORMAL"
 
-        results = {
-            r.name: r
-            for r in self.supervisor_results
-        }
-
-        conflict_risk = (
-            results.get(
-                "trajectory_conflict"
-            ).score
-            if results.get(
-                "trajectory_conflict"
-            )
-            else 0.0
+        conflict_risk = getattr(traj, "score", 0.0)
+        intersection_risk = getattr(
+            intersection,
+            "score",
+            0.0
         )
 
-        intersection_risk = (
-            results.get(
-                "intersection_occupancy"
-            ).score
-            if results.get(
-                "intersection_occupancy"
+        avoid_side = (
+            traj.details.get(
+                "avoid_side",
+                "LEFT"
             )
-            else 0.0
+            if traj else "LEFT"
+        )
+
+        self.update_avoidance_state(
+            conflict_risk,
+            avoid_side
         )
 
         trust_issue = (
-            self.runtime_state
-            in
-            [
-                "DEGRADED",
-                "WARNING",
-                "UNSAFE"
-            ]
+            self.runtime_state != "NORMAL"
         )
 
-        #
-        # NORMATIVE ACTION HIERARCHY
-        #
+        self.agent_speed_factor = (
+            0.5 * self.operator_speed_factor
+            if trust_issue
+            else self.operator_speed_factor
+        )
 
         if trust_issue:
+            self.decision_action = "DEGRADED_MODE"
 
-            self.decision_action = (
-                "DEGRADED_MODE"
-            )
-
-        elif intersection_risk > 0.40:
-
+        elif intersection_risk > 0.5:
             self.decision_action = (
                 "WAIT_BEFORE_INTERSECTION"
             )
 
-        elif conflict_risk > 0.70:
-
+        elif conflict_risk > 0.75:
             self.decision_action = (
-                "AVOID_LEFT"
+                f"AVOID_{avoid_side}"
             )
 
-        elif conflict_risk > 0.50:
-
-            self.decision_action = (
-                "YIELD"
-            )
+        elif conflict_risk > 0.60:
+            self.decision_action = "YIELD"
 
         else:
+            self.decision_action = "PROCEED"
 
-            self.decision_action = (
-                "PROCEED"
-            )
-
-        self.warning_level = "NONE"
-
-        if conflict_risk > 0.5:
-
-            self.warning_level = "WARNING"
-
-        self.near_miss = (
-
-            self.minimum_ttc < 1.0
-
-            and
-
-            not self.alert_collision
+        self.warning_level = (
+            "EMERGENCY"
+            if conflict_risk > 0.90
+            else "URGENT"
+            if conflict_risk > 0.75
+            else "WARNING"
+            if conflict_risk > 0.50
+            else "NONE"
         )
 
-        self.failed_test = False
+        self.forklift_alert = (
+            conflict_risk > 0.50
+        )
 
-        if self.alert_collision:
+        self.scenario_type = (
+            "TRUST_DEGRADATION"
+            if trust_issue
+            else "INTERSECTION_BLOCKAGE"
+            if intersection_risk > 0.40
+            else "COLLISION_AVOIDANCE"
+            if conflict_risk > 0.50
+            else "NONE"
+        )
 
-            self.failed_test = True
+        self.scenario_risk = (
+            1.0 - self.current_trust
+            if trust_issue
+            else max(
+                conflict_risk,
+                intersection_risk
+            )
+        )
 
-        if (
-            self.minimum_ttc < 2
-            and
-            self.decision_action == "GO"
-        ):
-            self.failed_test = True
+        self.near_miss = (
+            self.minimum_ttc < 1.0
+            and not self.alert_collision
+        )
+
+        self.failed_test = (
+            self.alert_collision
+            or (
+                self.minimum_ttc < 2.0
+                and self.decision_action == "PROCEED"
+            )
+        )
 
     def compute_ttc(self, obj):
 
@@ -2101,107 +2060,80 @@ class MVPViewer(FigureCanvasQTAgg):
     # ==================================================
 
     def update_agent(self):
+
+        blend_rate = 4.0
+
+        self.current_lane_offset += np.clip(
+            self.target_lane_offset
+            - self.current_lane_offset,
+            -blend_rate,
+            blend_rate
+        )
+
         if (
-            self.decision_action
-            ==
-            "AVOID_LEFT"
+            self.dragging
+            or self.decision_action
+            in [
+                "WAIT_BEFORE_INTERSECTION",
+                "DEGRADED_MODE"
+            ]
         ):
-
-            self.agent_y -= 20
-
-        elif (
-            self.decision_action
-            ==
-            "AVOID_RIGHT"
-        ):
-
-            self.agent_y += 20
-        if self.dragging:
             return
 
         path = DEFAULT_PATHS.get(
             self.current_path_name
         )
 
-        if path is None:
+        if (
+            path is None
+            or len(path.waypoints) < 2
+        ):
             return
 
-        wp = path.waypoints
-
-        if len(wp) < 2:
-            return
-
-        # path changed or robot invalid
         if (
             self.current_waypoint_idx <= 0
             or
-            self.current_waypoint_idx >= len(wp)
+            self.current_waypoint_idx >= len(path.waypoints)
         ):
             self.snap_agent_to_active_path()
 
-        #
-        # robot somehow not on path
-        #
-
-        if self.current_waypoint_idx <= 0:
-            self.current_waypoint_idx = 1
-
-        if self.current_waypoint_idx >= len(wp):
-            return
-
-        speed = (
-            path.speed *
-            self.agent_speed_factor
+        remaining = (
+            path.speed
+            * self.agent_speed_factor
         )
-
-        #
-        # consume full motion budget
-        #
-
-        remaining = speed
 
         while remaining > 0:
 
-            if self.current_waypoint_idx >= len(wp):
-                break
+            if self.current_waypoint_idx >= len(path.waypoints):
+                return
 
-            tx, ty = wp[
-                self.current_waypoint_idx
-            ]
+            tx, ty = self.get_offset_target(
+                *path.waypoints[
+                    self.current_waypoint_idx
+                ]
+            )
 
             dx = tx - self.agent_x
             dy = ty - self.agent_y
 
-            dist = math.hypot(
-                dx,
-                dy
-            )
+            dist = math.hypot(dx, dy)
 
             if dist < 1.0:
-
                 self.current_waypoint_idx += 1
                 continue
 
-            if dist <= remaining:
+            step = min(
+                remaining,
+                dist
+            )
 
-                self.agent_x = tx
-                self.agent_y = ty
+            self.agent_x += dx * step / dist
+            self.agent_y += dy * step / dist
 
-                remaining -= dist
+            remaining -= step
 
+            if step == dist:
                 self.current_waypoint_idx += 1
-
-                continue
-
-            self.agent_x += (
-                dx / dist
-            ) * remaining
-
-            self.agent_y += (
-                dy / dist
-            ) * remaining
-
-            break
     # ==================================================
     # Main frame update
     # ==================================================
@@ -2224,6 +2156,28 @@ class MVPViewer(FigureCanvasQTAgg):
 
         self.draw_objects(frame)
 
+        #
+        # 1. Observe scene
+        #
+        self.compute_scene_info(
+            frame
+        )
+
+        #
+        # 2. Retrieve predictions
+        #
+        self.lookup_predictions()
+
+        #
+        # 3. Decide
+        #
+        self.evaluate_scene_risk(
+            frame
+        )
+
+        #
+        # 4. Act
+        #
         self.update_agent()
 
         self.vehicle_dot.set_data(
@@ -2231,15 +2185,8 @@ class MVPViewer(FigureCanvasQTAgg):
             [self.agent_y]
         )
 
-        self.compute_scene_info(frame)
-
-        self.lookup_predictions()
-
-        self.evaluate_scene_risk(
-            frame
-        )
-
         self.log_evidence()
+
         self.draw_active_trajectory()
 
         self.draw_robot_path()
@@ -2330,11 +2277,6 @@ class MVPViewer(FigureCanvasQTAgg):
         self.alert_collision = False
         self.alert_ood = None
 
-        vp = Point(
-            self.agent_x,
-            self.agent_y
-        )
-
         self.relevant_cameras = (
             self.get_relevant_cameras()
         )
@@ -2361,18 +2303,35 @@ class MVPViewer(FigureCanvasQTAgg):
 
         worst_score = -1
 
+        OOD_MATCH_WINDOW_MS = 1000
+
         for cam in self.relevant_cameras:
+
             scores, keys = load_ood(cam)
 
-            if not keys:
+            if len(keys) == 0:
                 continue
 
-            nearest_key = min(
-                keys,
-                key=lambda k: abs(int(k) - ts)
+            delta = np.abs(
+                keys - ts
             )
 
-            result = scores.get(nearest_key)
+            idx = delta.argmin()
+
+            #
+            # reject stale match
+            #
+
+            if delta[idx] > OOD_MATCH_WINDOW_MS:
+                continue
+
+            nearest_key = int(
+                keys[idx]
+            )
+
+            result = scores.get(
+                nearest_key
+            )
 
             if result is None:
                 continue
@@ -2380,7 +2339,9 @@ class MVPViewer(FigureCanvasQTAgg):
             score = float(result[0])
 
             if score > worst_score:
+
                 worst_score = score
+
                 self.alert_ood = result
 
         #
@@ -2390,60 +2351,28 @@ class MVPViewer(FigureCanvasQTAgg):
         objects = frame["objects"]
 
         if self.active_track_id is not None:
-
             objects = [
-                o
-                for o in objects
-                if o["track_id"] == self.active_track_id
+                o for o in objects
+                if o["track_id"]
+                == self.active_track_id
             ]
+
+        self.alert_collision = False
 
         for obj in objects:
 
-            try:
+            cx, cy = world_to_occupancy(
+                *obj["center_world"]
+            )
 
-                cx, cy = world_to_occupancy(
-                    *obj["center_world"]
-                )
+            d = math.hypot(
+                cx - self.agent_x,
+                cy - self.agent_y
+            )
 
-                width = float(
-                    obj["bbox_width"]
-                )
-
-                length = float(
-                    obj["bbox_length"]
-                )
-
-                angle = float(
-                    obj["angle"]
-                )
-
-                expand_l, expand_w = (
-                    uncertainty_bbox(
-                        obj["track_id"]
-                    )
-                )
-
-                outer_box = make_rotated_bbox(
-                    cx,
-                    cy,
-                    width + 2*expand_w,
-                    length + 2*expand_l,
-                    angle
-                )
-
-                if Polygon(
-                    outer_box[:-1]
-                ).contains(
-                    Point(
-                        self.agent_x,
-                        self.agent_y
-                    )
-                ):
-                    self.alert_collision = True
-                    break
-
-            except Exception:
-                pass
+            if d < 30:
+                self.alert_collision = True
+                break
 
     def lookup_predictions(self):
         key = (
@@ -2515,10 +2444,69 @@ class MVPViewer(FigureCanvasQTAgg):
             )
         self.compute_prediction_consistency()
 
+    def draw_bbox(
+        self,
+        bbox,
+        color,
+        lw=2,
+        alpha=1.0,
+        zorder=30
+    ):
+
+        artist, = self.ax.plot(
+            bbox[:, 0],
+            bbox[:, 1],
+            color=color,
+            lw=lw,
+            alpha=alpha,
+            zorder=zorder
+        )
+
+        self.box_artists.append(
+            artist
+        )
+
+        return artist
+
+    def draw_velocity_arrow(
+        self,
+        cx,
+        cy,
+        angle
+    ):
+
+        hx = (
+            cx
+            + 40 * np.cos(
+                np.deg2rad(angle)
+            )
+        )
+
+        hy = (
+            cy
+            + 40 * np.sin(
+                np.deg2rad(angle)
+            )
+        )
+
+        arrow, = self.ax.plot(
+            [cx, hx],
+            [cy, hy],
+            color="yellow",
+            lw=2,
+            zorder=35
+        )
+
+        self.box_artists.append(
+            arrow
+        )
+    def add_artist(self, artist):
+        self.box_artists.append(artist)
+        return artist
 
     def draw_objects(self, frame):
 
-        self.track_ids_current = []
+        self.track_ids_current.clear()
 
         active = self.active_track_id
 
@@ -2530,11 +2518,12 @@ class MVPViewer(FigureCanvasQTAgg):
                 tid
             )
 
-            wx, wy = obj["center_world"]
-
             cx, cy = world_to_occupancy(
-                wx,
-                wy
+                *obj["center_world"]
+            )
+
+            angle = float(
+                obj["angle"]
             )
 
             width = float(
@@ -2543,10 +2532,6 @@ class MVPViewer(FigureCanvasQTAgg):
 
             length = float(
                 obj["bbox_length"]
-            )
-
-            angle = float(
-                obj["angle"]
             )
 
             expand_l, expand_w = (
@@ -2564,8 +2549,8 @@ class MVPViewer(FigureCanvasQTAgg):
             outer_box = make_rotated_bbox(
                 cx,
                 cy,
-                width  + 2*expand_w,
-                length + 2*expand_l,
+                width + 2 * expand_w,
+                length + 2 * expand_l,
                 angle
             )
 
@@ -2573,22 +2558,16 @@ class MVPViewer(FigureCanvasQTAgg):
                 tid == active
             )
 
-            outer_artist, = self.ax.plot(
-                outer_box[:,0],
-                outer_box[:,1],
+            self.draw_bbox(
+                outer_box,
                 color="orange",
                 lw=1.5,
-                alpha=0.55,
+                alpha=0.6,
                 zorder=25
             )
 
-            self.box_artists.append(
-                outer_artist
-            )
-
-            inner_artist, = self.ax.plot(
-                inner_box[:,0],
-                inner_box[:,1],
+            self.draw_bbox(
+                inner_box,
                 color=(
                     "lime"
                     if is_active
@@ -2602,45 +2581,16 @@ class MVPViewer(FigureCanvasQTAgg):
                 zorder=30
             )
 
-            self.box_artists.append(
-                inner_artist
-            )
-
             vx, vy = obj[
                 "velocity_world"
             ]
 
-            speed = np.hypot(
-                vx,
-                vy
-            )
+            if np.hypot(vx, vy) > 0.05:
 
-            if speed > 0.05:
-
-                hx = (
-                    cx
-                    + 40*np.cos(
-                        np.deg2rad(angle)
-                    )
-                )
-
-                hy = (
-                    cy
-                    + 40*np.sin(
-                        np.deg2rad(angle)
-                    )
-                )
-
-                arrow, = self.ax.plot(
-                    [cx, hx],
-                    [cy, hy],
-                    color="yellow",
-                    lw=2,
-                    zorder=35
-                )
-
-                self.box_artists.append(
-                    arrow
+                self.draw_velocity_arrow(
+                    cx,
+                    cy,
+                    angle
                 )
 
             txt = self.ax.text(
@@ -2652,7 +2602,7 @@ class MVPViewer(FigureCanvasQTAgg):
                 ha="center"
             )
 
-            self.box_artists.append(txt)
+            self.add_artist(txt)
 
     def clear_artists(self):
 
@@ -2721,11 +2671,69 @@ class MainWindow(QMainWindow):
             border-radius:4px;
             """
         )
-        self.label_action = QLabel("Decision: GO")
-        self.label_runtime = QLabel("Runtime: NORMAL")
-        self.label_ttc = QLabel("Min TTC: -")
-        self.label_trust = QLabel("Trust: -")
-        self.label_status = QLabel("Collision: NO")
+        # ======================================
+        # Operational Status
+        # ======================================
+        self.label_status = QLabel(
+            "Collision : NO"
+        )
+
+        self.label_runtime = QLabel(
+            "Runtime : NORMAL"
+        )
+        self.label_state = QLabel(
+            "System State: NORMAL"
+        )
+
+        self.label_scenario = QLabel(
+            "Scenario: None"
+        )
+
+        self.label_risk = QLabel(
+            "Risk Level: LOW"
+        )
+
+        # ======================================
+        # Mitigation
+        # ======================================
+
+        self.label_action = QLabel(
+            "Action: PROCEED"
+        )
+
+        self.label_warning = QLabel(
+            "Warning: NONE"
+        )
+
+        # ======================================
+        # Trustworthiness
+        # ======================================
+
+        self.label_trust = QLabel(
+            "Trust Score: 1.00"
+        )
+
+        self.label_trust_reason = QLabel(
+            "Trust Assessment: OK"
+        )
+
+        # ======================================
+        # Timing
+        # ======================================
+
+        self.label_ttc = QLabel(
+            "Predicted TTC: N/A"
+        )
+
+        # ======================================
+        # Scenario Explanation
+        # ======================================
+
+        self.label_explanation = QLabel(
+            "No active scenario."
+        )
+
+        self.label_explanation.setWordWrap(True)
         self.label_object = QLabel("Forklift: -")
         self.label_route = QLabel("Route: -")
         self.label_route_prob = QLabel("Route Prob: -")
@@ -2790,11 +2798,34 @@ class MainWindow(QMainWindow):
         ctrl.addSpacing(10)
         ctrl.addWidget(self.label_result_banner)
 
+        ctrl.addWidget(self.label_state)
+
+        ctrl.addWidget(self.label_scenario)
+
+        ctrl.addWidget(self.label_risk)
+
+        ctrl.addSpacing(5)
+
         ctrl.addWidget(self.label_action)
-        ctrl.addWidget(self.label_runtime)
+
+        ctrl.addWidget(self.label_warning)
+
+        ctrl.addSpacing(5)
+
         ctrl.addWidget(self.label_ttc)
+
+        ctrl.addSpacing(5)
+
         ctrl.addWidget(self.label_trust)
-        ctrl.addWidget(self.label_status)
+        ctrl.addWidget(self.label_trust_reason)
+
+        ctrl.addSpacing(10)
+
+        ctrl.addWidget(QLabel("Assessment"))
+
+        ctrl.addWidget(
+            self.label_explanation
+        )
 
         # ==================================================
         # Prediction
@@ -2877,6 +2908,51 @@ class MainWindow(QMainWindow):
                 self.viewer.frame_idx
             )
 
+
+    def scenario_description(
+        self,
+        scenario
+    ):
+
+        descriptions = {
+
+            "NONE":
+            (
+                "No hazardous scenario "
+                "is currently predicted."
+            ),
+
+            "COLLISION_AVOIDANCE":
+            (
+                "Forklift trajectory is "
+                "predicted to intersect "
+                "the AMR corridor. "
+                "Avoidance manoeuvre "
+                "is required."
+            ),
+
+            "INTERSECTION_BLOCKAGE":
+            (
+                "Occupancy prediction "
+                "indicates simultaneous "
+                "intersection usage. "
+                "AMR shall wait before "
+                "entering."
+            ),
+
+            "TRUST_DEGRADATION":
+            (
+                "Prediction or perception "
+                "confidence below safe "
+                "threshold. Reduced "
+                "autonomy activated."
+            )
+        }
+
+        return descriptions.get(
+            scenario,
+            scenario
+        )
 
     def create_new_path(self):
         idx = 1
@@ -3006,6 +3082,73 @@ class MainWindow(QMainWindow):
 
         self.refresh_info_panel()
 
+    def set_label(
+        self,
+        label,
+        value
+    ):
+
+        label.setText(value)
+
+    def risk_level(
+        self,
+        risk
+    ):
+
+        if risk > 0.80:
+            return "CRITICAL"
+
+        if risk > 0.60:
+            return "HIGH"
+
+        if risk > 0.30:
+            return "MEDIUM"
+
+        return "LOW"
+
+    def trust_description(
+        self,
+        trust
+    ):
+
+        if trust < 0.25:
+            return "Unsafe operation"
+
+        if trust < 0.50:
+            return "Low confidence"
+
+        if trust < 0.80:
+            return "Restricted autonomy"
+
+        return "Nominal operation"
+
+    def update_colored_metric(
+        self,
+        label,
+        value,
+        red,
+        yellow
+    ):
+
+        if value < red:
+
+            color = "#ff4444"
+
+        elif value < yellow:
+
+            color = "#ffb300"
+
+        else:
+
+            color = "#66bb6a"
+
+        label.setStyleSheet(
+            f"""
+            color:{color};
+            font-weight:bold;
+            """
+        )
+
     def refresh_info_panel(self):
 
         v = self.viewer
@@ -3013,41 +3156,44 @@ class MainWindow(QMainWindow):
         route = v.route_info or {}
         mode = v.mode_info or {}
 
-        #
-        # Result Banner
-        #
+        scenario = getattr(
+            v,
+            "scenario_type",
+            "NONE"
+        )
 
-        if v.alert_collision:
+        banner = {
 
-            self.label_result_banner.setText(
-                "FAIL - COLLISION"
-            )
+            "NONE":
+                ("PROCEED", "#2e7d32"),
 
-            color = "#c62828"
+            "COLLISION_AVOIDANCE":
+                (
+                    "AVOIDING FORKLIFT",
+                    "#fbc02d"
+                ),
 
-        elif v.failed_test:
+            "INTERSECTION_BLOCKAGE":
+                (
+                    "WAIT AT INTERSECTION",
+                    "#fb8c00"
+                ),
 
-            self.label_result_banner.setText(
-                "FAIL"
-            )
+            "TRUST_DEGRADATION":
+                (
+                    "DEGRADED MODE",
+                    "#d32f2f"
+                )
+        }
 
-            color = "#ef6c00"
+        title, color = banner.get(
+            scenario,
+            ("UNKNOWN", "#777777")
+        )
 
-        elif v.near_miss:
-
-            self.label_result_banner.setText(
-                "WARNING"
-            )
-
-            color = "#f9a825"
-
-        else:
-
-            self.label_result_banner.setText(
-                "PASS"
-            )
-
-            color = "#2e7d32"
+        self.label_result_banner.setText(
+            title
+        )
 
         self.label_result_banner.setStyleSheet(
             f"""
@@ -3060,148 +3206,178 @@ class MainWindow(QMainWindow):
             """
         )
 
-        #
-        # Safety summary
-        #
+        scenario_names = {
 
-        self.label_action.setText(
-            f"Decision : {v.decision_action}"
+            "NONE":
+                "No Hazard",
+
+            "COLLISION_AVOIDANCE":
+                "Corridor Conflict",
+
+            "INTERSECTION_BLOCKAGE":
+                "Intersection Conflict",
+
+            "TRUST_DEGRADATION":
+                "Trust Degradation"
+        }
+
+        self.set_label(
+            self.label_state,
+            f"System State: {v.runtime_state}"
         )
 
-        self.label_runtime.setText(
-            f"Runtime : {v.runtime_state}"
+        self.set_label(
+            self.label_scenario,
+            "Scenario: "
+            +
+            scenario_names.get(
+                scenario,
+                scenario
+            )
         )
 
-        if np.isfinite(v.minimum_ttc):
-            self.label_ttc.setText(
-                f"TTC : {v.minimum_ttc:.1f}s"
-            )
-        else:
-            self.label_ttc.setText(
-                "TTC : N/A"
-            )
-
-        self.label_trust.setText(
-            f"Trust : {v.current_trust:.2f}"
+        self.set_label(
+            self.label_risk,
+            f"Risk Level: "
+            f"{self.risk_level(v.scenario_risk)}"
         )
 
-        if v.alert_collision:
+        self.set_label(
+            self.label_action,
+            f"Action: "
+            f"{v.decision_action}"
+        )
 
-            self.label_status.setText(
-                "Collision : YES"
+        warning = v.warning_level
+
+        if getattr(
+            v,
+            "forklift_alert",
+            False
+        ):
+            warning += " | ALERT SENT"
+
+        self.set_label(
+            self.label_warning,
+            f"Warning: {warning}"
+        )
+
+        ttc_text = (
+            f"Predicted TTC: "
+            f"{v.minimum_ttc:.2f}s"
+            if np.isfinite(
+                v.minimum_ttc
             )
+            else
+            "Predicted TTC: N/A"
+        )
 
-        elif v.near_miss:
+        self.set_label(
+            self.label_ttc,
+            ttc_text
+        )
 
-            self.label_status.setText(
-                "Collision : NEAR MISS"
+        self.set_label(
+            self.label_trust,
+            f"Trust Score: "
+            f"{v.current_trust:.2f}"
+        )
+
+        self.set_label(
+            self.label_trust_reason,
+            "Trust Assessment: "
+            +
+            self.trust_description(
+                v.current_trust
             )
+        )
 
-        else:
-
-            self.label_status.setText(
-                "Collision : NO"
+        self.set_label(
+            self.label_explanation,
+            self.scenario_description(
+                scenario
             )
+        )
 
-        #
-        # Forklift information
-        #
-
-        self.label_object.setText(
-            f"Forklift ID : {v.active_track_id}"
+        self.set_label(
+            self.label_object,
+            f"Forklift ID : "
+            f"{v.active_track_id}"
         )
 
         if route:
-            display_label = (
-                v.mode_info.get("display_label")
-                if v.mode_info
-                else None
-            )
-            if display_label:
 
-                self.label_route.setText(
-                    f"Route : {display_label}"
-                )
-            else:
-                self.label_route.setText(
-                    f"Route : "
+            self.set_label(
+                self.label_route,
+                "Route : "
+                +
+                (
+                    route.get(
+                        "display_label"
+                    )
+                    or
                     f"{route.get('from','?')} → "
                     f"{route.get('to','?')}"
                 )
-
-            mode_probs = mode.get(
-                "mode_probs",
-                {}
             )
 
-            if mode_probs:
-
-                mode_name = mode.get(
-                    "mode",
-                    "unknown"
-                )
-
-                conf = mode_probs.get(
-                    mode_name,
-                    0.0
-                )
-
-                self.label_mode_prob.setText(
-                    f"Mode Prob : {conf:.2f}"
-                )
-
-            else:
-
-                self.label_mode_prob.setText(
-                    "Mode Prob : N/A"
-                )
-
-
-            unc = route.get("uncertainty")
-
-            if unc is not None:
-
-                self.label_route_unc.setText(
-                    f"Route Unc : {unc:.2f}"
-                )
-
-            else:
-
-                self.label_route_unc.setText(
-                    "Route Unc : N/A"
-                )
-
-        else:
-
-            self.label_route.setText(
-                "Route : N/A"
-            )
-
-            self.label_route_prob.setText(
+            self.set_label(
+                self.label_route_prob,
+                f"Route Prob : "
+                f"{float(route.get('prob',0)):.2f}"
+                if route.get("prob")
+                is not None
+                else
                 "Route Prob : N/A"
             )
 
-            self.label_route_unc.setText(
+            self.set_label(
+                self.label_route_unc,
+                f"Route Unc : "
+                f"{float(route.get('uncertainty',0)):.2f}"
+                if route.get("uncertainty")
+                is not None
+                else
                 "Route Unc : N/A"
             )
 
-        self.label_mode.setText(
-            f"Maneuver : {mode.get('mode','N/A')}"
+        else:
+
+            self.set_label(
+                self.label_route,
+                "Route : N/A"
+            )
+
+            self.set_label(
+                self.label_route_prob,
+                "Route Prob : N/A"
+            )
+
+            self.set_label(
+                self.label_route_unc,
+                "Route Unc : N/A"
+            )
+
+        self.set_label(
+            self.label_mode,
+            f"Maneuver : "
+            f"{mode.get('mode','N/A')}"
         )
 
-        display_conf = mode.get(
+        conf = mode.get(
             "display_confidence"
         )
 
-        if display_conf is not None:
-
-            self.label_route_prob.setText(
-                f"Display Conf : {display_conf:.2f}"
+        self.set_label(
+            self.label_mode_prob,
+            (
+                f"Maneuver Conf : "
+                f"{float(conf):.2f}"
             )
-
-        #
-        # Diagnostics
-        #
+            if conf is not None
+            else
+            "Maneuver Conf : N/A"
+        )
 
         cams = getattr(
             v,
@@ -3209,93 +3385,55 @@ class MainWindow(QMainWindow):
             []
         )
 
-        if cams:
-
-            self.label_cam.setText(
-                "Camera(s) : "
-                + ",".join(cams)
-            )
-
-        else:
-
-            self.label_cam.setText(
-                "Camera(s) : NONE"
-            )
-
-        if v.alert_ood:
-            score = float(v.alert_ood[0])
-            flag = bool(v.alert_ood[1])
-
-            status = (
-                "ANOMALOUS"
-                if flag
-                else
-                "NORMAL"
-            )
-            self.label_ood.setText(
-                f"OOD : {score:.9f} | {status}"
-            )
-        else:
-
-            self.label_ood.setText(
-                "OOD : N/A"
-            )
-
-        intersection = next(
+        self.set_label(
+            self.label_cam,
+            "Camera(s): "
+            +
             (
-                r
-                for r in v.supervisor_results
-                if r.name == "intersection_occupancy"
-            ),
-            None
+                ",".join(cams)
+                if cams
+                else "NONE"
+            )
         )
 
-        if intersection:
-
-            self.label_runtime.setText(
-                f"Runtime : "
-                f"{v.runtime_state} | "
-                f"IntersectionRisk={intersection.score:.2f}"
+        self.set_label(
+            self.label_ood,
+            (
+                f"OOD : "
+                f"{float(v.alert_ood[0]):.6f}"
+                f" | "
+                f"{'ANOMALOUS' if v.alert_ood[1] else 'NORMAL'}"
             )
-        #
-        # Color coding
-        #
+            if v.alert_ood
+            else
+            "OOD : N/A"
+        )
 
-        if v.minimum_ttc < 2:
-
-            self.label_ttc.setStyleSheet(
-                "color:#ff4444;font-weight:bold;"
-            )
-
-        elif v.minimum_ttc < 4:
-
-            self.label_ttc.setStyleSheet(
-                "color:#ffb300;font-weight:bold;"
-            )
-
-        else:
-
-            self.label_ttc.setStyleSheet(
-                "color:#66bb6a;font-weight:bold;"
-            )
+        self.update_colored_metric(
+            self.label_ttc,
+            v.minimum_ttc,
+            2,
+            4
+        )
 
         if v.current_trust < 0.4:
 
-            self.label_trust.setStyleSheet(
-                "color:#ff4444;font-weight:bold;"
-            )
+            color = "#ff4444"
 
         elif v.current_trust < 0.7:
 
-            self.label_trust.setStyleSheet(
-                "color:#ffb300;font-weight:bold;"
-            )
+            color = "#ffb300"
 
         else:
 
-            self.label_trust.setStyleSheet(
-                "color:#66bb6a;font-weight:bold;"
-            )
+            color = "#66bb6a"
+
+        self.label_trust.setStyleSheet(
+            f"""
+            color:{color};
+            font-weight:bold;
+            """
+        )
 
     def refresh_object_combo(self):
 
@@ -3378,7 +3516,7 @@ class MainWindow(QMainWindow):
             text.replace("x", "")
         )
 
-        self.viewer.agent_speed_factor = factor
+        self.viewer.operator_speed_factor = factor
 
 
 # ==========================================================
