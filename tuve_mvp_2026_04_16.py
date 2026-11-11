@@ -320,55 +320,46 @@ def load_ood(cam_id):
     if cam_id in OOD_CACHE:
         return OOD_CACHE[cam_id]
 
-    path = os.path.join(
-        OOD_ROOT,
-        f"{cam_id}.csv"
+    npz = (
+        Path(OOD_ROOT)
+        / cam_id
+        / "ood_score.npz"
     )
 
-    if not os.path.exists(path):
+    if not npz.exists():
 
-        OOD_CACHE[cam_id] = {
-            "scores": {},
-            "keys": np.asarray([], dtype=np.int64),
-        }
+        OOD_CACHE[cam_id] = (
+            {},
+            []
+        )
 
         return OOD_CACHE[cam_id]
 
-    try:
+    dtype = np.dtype([
+        ("id", np.uint64),
+        ("ood_score", np.float32),
+        ("pred", np.uint8)
+    ])
 
-        import pandas as pd
+    arr = np.fromfile(
+        npz,
+        dtype=dtype
+    )
 
-        df = pd.read_csv(path)
-
-        result = {}
-
-        for _, row in df.iterrows():
-
-            ts = int(row["frame_id"])
-
-            result[str(ts)] = (
-                float(row["ood_score"]),
-                bool(row["ood_flag"]),
+    result = (
+        {
+            str(i): (
+                float(s),
+                bool(p)
             )
+            for i, s, p in arr
+        },
+        list(map(str, arr["id"]))
+    )
 
-        keys = np.asarray(
-            sorted(int(k) for k in result.keys()),
-            dtype=np.int64,
-        )
+    OOD_CACHE[cam_id] = result
 
-        OOD_CACHE[cam_id] = {
-            "scores": result,
-            "keys": keys,
-        }
-
-    except Exception:
-
-        OOD_CACHE[cam_id] = {
-            "scores": {},
-            "keys": np.asarray([], dtype=np.int64),
-        }
-
-    return OOD_CACHE[cam_id]
+    return result
 
 
 # ==========================================================
@@ -815,7 +806,118 @@ class LegacyTrackUncertaintySupervisor(
 
             flag=(score > 0.7)
         )
-    
+
+class IntersectionOccupancySupervisor(
+    Supervisor
+):
+
+    name = "intersection_occupancy"
+
+    category = "planning"
+
+    JUNCTION_TTC = 1.0
+
+    def evaluate(
+        self,
+        scene
+    ):
+
+        mode_info = (
+            scene.maneuver_prediction
+        )
+
+        route_info = (
+            scene.route_prediction
+        )
+
+        if (
+            mode_info is None
+            or route_info is None
+        ):
+            return SupervisorResult(
+                name=self.name,
+                category=self.category,
+                score=0.0,
+                confidence=1.0,
+                flag=False,
+            )
+
+        display_label = mode_info.get(
+            "display_label",
+            ""
+        )
+
+        mode_name = mode_info.get(
+            "mode",
+            "unknown"
+        )
+
+        route_unc = float(
+            route_info.get(
+                "uncertainty",
+                0.0
+            )
+        )
+
+        ttc = scene.ttc
+
+        score = 0.0
+
+        #
+        # loading within junction
+        #
+        if (
+            mode_name == "loading"
+            and "INTERSECTION" in display_label
+        ):
+
+            score = 1.0
+
+        #
+        # stationary in junction
+        #
+        elif (
+            mode_name == "stationary"
+            and "INTERSECTION" in display_label
+        ):
+
+            score = 0.8
+
+        #
+        # robot inside junction and
+        # predicted conflict approaching
+        #
+        elif (
+            scene.frame is not None
+            and np.isfinite(ttc)
+            and ttc < self.JUNCTION_TTC
+        ):
+
+            score = 0.9
+
+        #
+        # prediction uncertainty
+        #
+        score = max(
+            score,
+            route_unc
+        )
+
+        return SupervisorResult(
+            name=self.name,
+            category=self.category,
+            score=score,
+            confidence=max(
+                0.0,
+                1.0 - score
+            ),
+            flag=score > 0.7,
+            details={
+                "ttc": ttc,
+                "mode": mode_name,
+                "route_uncertainty": route_unc,
+            },
+        )
 # ==========================================================
 # ROBOT PATH LIBRARY
 # ==========================================================
@@ -1010,7 +1112,9 @@ class MVPViewer(FigureCanvasQTAgg):
         self.supervisor_manager.register(
             ManeuverUncertaintySupervisor()
         )
-
+        self.supervisor_manager.register(
+            IntersectionOccupancySupervisor()
+        )
         self.supervisor_results = []
 
         self.decision_engine = (
@@ -1018,9 +1122,6 @@ class MVPViewer(FigureCanvasQTAgg):
         )
 
 
-        self.route_history = deque(
-            maxlen=10
-        )
         self.route_history = deque(
             maxlen=10
         )
@@ -1235,7 +1336,15 @@ class MVPViewer(FigureCanvasQTAgg):
             r.name: r
             for r in self.supervisor_results
         }
+        intersection = results.get(
+            "intersection_occupancy"
+        )
 
+        intersection_risk = (
+            intersection.score
+            if intersection
+            else 0.0
+        )
         ood = results.get(
             "camera_ood"
         )
@@ -1263,10 +1372,10 @@ class MVPViewer(FigureCanvasQTAgg):
         # Legacy trust
         #
         legacy_trust = (
-
             1.0
             - 0.2 * ood_score
             - 0.3 * track_unc
+            - 0.4 * intersection_risk
         )
 
         if ood_flag:
@@ -2044,52 +2153,19 @@ class MVPViewer(FigureCanvasQTAgg):
 
         for cam in self.relevant_cameras:
 
-            ood_data = load_ood(cam)
+            scores, keys = load_ood(cam)
 
-            scores = ood_data.get("scores", {})
-
-            keys = ood_data.get(
-                "keys",
-                np.asarray([], dtype=np.int64)
-            )
-
-            if keys.size == 0:
+            if len(keys) == 0:
                 continue
 
-            idx = np.searchsorted(
-                keys,
-                ts
-            )
-
-            if idx == 0:
-
-                nearest_key = str(keys[0])
-
-            elif idx >= len(keys):
-
-                nearest_key = str(keys[-1])
-
-            else:
-
-                before = keys[idx - 1]
-                after = keys[idx]
-
-                nearest_key = str(
-                    before
-                    if abs(ts - before) <= abs(after - ts)
-                    else after
-                )
-
             result = scores.get(
-                nearest_key
+                str(ts)
             )
 
             if result is None:
                 continue
 
-            score = float(
-                result[0]
-            )
+            score = float(result[0])
 
             if score > worst_score:
 
@@ -2903,20 +2979,14 @@ class MainWindow(QMainWindow):
             f"Maneuver : {mode.get('mode','N/A')}"
         )
 
-        conf = mode.get(
+        display_conf = mode.get(
             "display_confidence"
         )
 
-        if conf is not None:
+        if display_conf is not None:
 
-            self.label_mode_prob.setText(
-                f"Confidence : {conf:.2f}"
-            )
-
-        else:
-
-            self.label_mode_prob.setText(
-                "Confidence : N/A"
+            self.label_route_prob.setText(
+                f"Display Conf : {display_conf:.2f}"
             )
 
         #
@@ -2959,6 +3029,23 @@ class MainWindow(QMainWindow):
 
             self.label_ood.setText(
                 "OOD : N/A"
+            )
+
+        intersection = next(
+            (
+                r
+                for r in v.supervisor_results
+                if r.name == "intersection_occupancy"
+            ),
+            None
+        )
+
+        if intersection:
+
+            self.label_runtime.setText(
+                f"Runtime : "
+                f"{v.runtime_state} | "
+                f"IntersectionRisk={intersection.score:.2f}"
             )
         #
         # Color coding
@@ -3057,6 +3144,7 @@ class MainWindow(QMainWindow):
         self.viewer.frame_idx = 0
         self.viewer.route_history.clear()
         self.viewer.mode_history.clear()        
+        self.viewer._last_lookup_key = None
         self.viewer.update_frame(0)
 
     def seek(self, value):
