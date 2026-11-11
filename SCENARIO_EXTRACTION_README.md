@@ -50,3 +50,66 @@ Read the generated tables in:
 The candidate JSON includes source frame indices, track IDs, route/maneuver
 classification context, and nearby-forklift information for later replay and
 robot-path generation.
+
+## Purpose, provenance, and reproducibility
+
+The scenario workflow deliberately separates recorded factory behavior from
+simulated AMR behavior:
+
+- Forklift detections, polygons, timestamps, and motion come from the recorded
+  dataset. Forklifts are never simulated.
+- The trajectory/maneuver prediction file annotates each recorded forklift
+  state with route, maneuver, confidence, and uncertainty context.
+- Only the AMR path, timing, and resulting supervisor response are simulated.
+
+### Why window extraction uses predictions
+
+The physical candidate event is found from recorded forklift geometry. For
+example, Scenario 1 detects a recorded outside-to-inside transition through
+the intersection; Scenario 2 detects recorded forklift activity outside it.
+Predictions are then used to:
+
+- select a diverse set of route, maneuver, uncertainty, and traffic contexts;
+- describe the recorded event in the candidate reports; and
+- classify which Scenario 2 AMR response is intended (moving, stationary, or
+  loading context).
+
+Consequently, updating the trajectory/maneuver model or its prediction JSON
+can change the selected candidate ranking, labels, and intended-coverage
+metadata even when the underlying recorded forklift tracks are unchanged.
+
+### Why instance generation uses predictions and the supervisor
+
+Instance generators attach user-defined AMR reference paths to fixed recorded
+windows. They use prediction labels to document the intended test behavior and
+preserve the recorded prediction data in each replay frame. The supervisor is
+**not** used to create forklift behavior or choose a synthetic forklift path.
+It is run later during online replay or offline behavior precomputation to
+measure how the AMR should respond to the recorded scene.
+
+For a fixed assessment baseline, commit the candidate-window JSON and selected
+compressed instance artifact together. Regenerating from a different dataset
+or prediction-file version is useful for refreshing the scenario catalogue,
+but is not expected to be byte-identical.
+
+## Generate robot-path instances
+
+The generation scripts select and time reference-path variants against the
+candidate windows. They use local raw recordings from `JSON-data/`, but write
+their generated JSON and reports to the scenario folders:
+
+```bash
+python generate_scenario_1_instances.py
+python generate_scenario_2_instances.py
+```
+
+Generated uncompressed replay files are written to:
+
+- `scenario_data/scenario_1_instances.json`
+- `scenario_data/scenario_2_instances.json`
+
+The committed `.json.gz` variants contain the selected replay artifacts for
+sharing. The reports describing intended instance coverage are in:
+
+- `scenario_output/scenario_1_instance_classification.md`
+- `scenario_output/scenario_2_instance_classification.md`
