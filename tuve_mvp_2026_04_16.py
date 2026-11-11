@@ -1141,7 +1141,7 @@ class IntersectionOccupancyScenario:
                     conflict_track
             }
         )
-        
+    
 class TrajectoryConflictScenario:
 
     name = "trajectory_conflict"
@@ -2646,55 +2646,73 @@ class MVPViewer(FigureCanvasQTAgg):
             self.current_path_name
         )
 
-        if path is None:
+        if (
+            path is None
+            or
+            len(path.waypoints) < 2
+        ):
             return []
 
-        wp = path.waypoints
+        LOOKAHEAD_SEC = 8.0
 
-        if len(wp) < 2:
-            return []
+        travel_budget = (
+            path.speed
+            *
+            self.agent_speed_factor
+            *
+            LOOKAHEAD_SEC
+        )
 
-        cams = set()
+        cameras = set()
 
         #
-        # robot position
+        # Current robot position
         #
-
-        for c in getcamid(
+        for cam in getcamid(
             (
                 self.agent_y,
                 self.agent_x
             )
         ):
-            cams.add(str(c))
-
-        #
-        # sample future route
-        #
+            cameras.add(str(cam))
 
         px = self.agent_x
         py = self.agent_y
 
+        remaining = travel_budget
+
         for idx in range(
             self.current_waypoint_idx,
-            len(wp)
+            len(path.waypoints)
         ):
 
-            tx, ty = wp[idx]
+            tx, ty = path.waypoints[idx]
 
             seg_len = math.hypot(
                 tx - px,
                 ty - py
             )
 
-            n = max(
-                2,
-                int(seg_len / 20)
+            if remaining <= 0:
+                break
+
+            use_len = min(
+                seg_len,
+                remaining
             )
 
-            for k in range(n + 1):
+            samples = max(
+                2,
+                int(use_len / 20)
+            )
 
-                a = k / n
+            for k in range(samples + 1):
+
+                a = (
+                    k / samples
+                ) * (
+                    use_len / seg_len
+                )
 
                 sx = px + a * (
                     tx - px
@@ -2704,20 +2722,24 @@ class MVPViewer(FigureCanvasQTAgg):
                     ty - py
                 )
 
-                found = getcamid(
-                    (sy, sx)
-                )
-
-                for cam in found:
-
-                    cams.add(
+                for cam in getcamid(
+                    (
+                        sy,
+                        sx
+                    )
+                ):
+                    cameras.add(
                         str(cam)
                     )
+
+            remaining -= use_len
 
             px = tx
             py = ty
 
-        return sorted(cams)
+        return sorted(
+            cameras
+        )
 
     def compute_scene_info(self, frame):
 
