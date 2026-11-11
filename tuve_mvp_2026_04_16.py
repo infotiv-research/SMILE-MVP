@@ -812,111 +812,229 @@ class IntersectionOccupancySupervisor(
 ):
 
     name = "intersection_occupancy"
-
     category = "planning"
 
-    JUNCTION_TTC = 1.0
+    OCCUPANCY_WINDOW = 3.0
 
-    def evaluate(
-        self,
-        scene
-    ):
+    def evaluate(self, scene):
 
-        mode_info = (
-            scene.maneuver_prediction
-        )
+        viewer = scene.extra.get("viewer")
 
-        route_info = (
-            scene.route_prediction
+        center = scene.extra.get(
+            "intersection_center"
         )
 
         if (
-            mode_info is None
-            or route_info is None
+            viewer is None
+            or
+            center is None
         ):
             return SupervisorResult(
                 name=self.name,
                 category=self.category,
                 score=0.0,
                 confidence=1.0,
-                flag=False,
+                flag=False
             )
 
-        display_label = mode_info.get(
-            "display_label",
-            ""
+        robot_distance = np.linalg.norm(
+            np.array([
+                viewer.agent_x,
+                viewer.agent_y
+            ]) - np.asarray(center)
         )
 
-        mode_name = mode_info.get(
-            "mode",
-            "unknown"
-        )
-
-        route_unc = float(
-            route_info.get(
-                "uncertainty",
-                0.0
+        robot_arrival = (
+            robot_distance /
+            max(
+                1.0,
+                viewer.agent_speed_factor
             )
         )
 
-        ttc = scene.ttc
-
-        score = 0.0
-
-        #
-        # loading within junction
-        #
-        if (
-            mode_name == "loading"
-            and "INTERSECTION" in display_label
-        ):
-
-            score = 1.0
-
-        #
-        # stationary in junction
-        #
-        elif (
-            mode_name == "stationary"
-            and "INTERSECTION" in display_label
-        ):
-
-            score = 0.8
-
-        #
-        # robot inside junction and
-        # predicted conflict approaching
-        #
-        elif (
-            scene.frame is not None
-            and np.isfinite(ttc)
-            and ttc < self.JUNCTION_TTC
-        ):
-
-            score = 0.9
-
-        #
-        # prediction uncertainty
-        #
-        score = max(
-            score,
-            route_unc
+        robot_exit = (
+            robot_arrival +
+            self.OCCUPANCY_WINDOW
         )
+
+        overlap_prob = 0.0
+
+        for obj in scene.frame["objects"]:
+
+            cx, cy = world_to_occupancy(
+                *obj["center_world"]
+            )
+
+            vx, vy = obj["velocity_world"]
+
+            speed = max(
+                0.1,
+                np.hypot(vx, vy)
+            )
+
+            object_distance = np.linalg.norm(
+                np.array([cx, cy])
+                -
+                np.asarray(center)
+            )
+
+            obj_arrival = (
+                object_distance / speed
+            )
+
+            obj_exit = (
+                obj_arrival +
+                self.OCCUPANCY_WINDOW
+            )
+
+            overlap = (
+                max(
+                    robot_arrival,
+                    obj_arrival
+                )
+                <
+                min(
+                    robot_exit,
+                    obj_exit
+                )
+            )
+
+            if overlap:
+                overlap_prob = max(
+                    overlap_prob,
+                    0.85
+                )
 
         return SupervisorResult(
             name=self.name,
             category=self.category,
-            score=score,
-            confidence=max(
-                0.0,
-                1.0 - score
-            ),
-            flag=score > 0.7,
+            score=overlap_prob,
+            confidence=1.0-overlap_prob,
+            flag=overlap_prob > 0.40,
             details={
-                "ttc": ttc,
-                "mode": mode_name,
-                "route_uncertainty": route_unc,
-            },
+                "overlap_probability":
+                    overlap_prob
+            }
+        )
+
+class TrajectoryConflictSupervisor(Supervisor):
+
+    name = "trajectory_conflict"
+    category = "planning"
+
+    HORIZON_SEC = 8.0
+    DT = 0.5
+    SAFE_DISTANCE = 80.0
+
+    def evaluate(self, scene):
+
+        viewer = scene.extra.get("viewer")
+
+        if viewer is None:
+            return SupervisorResult(
+                name=self.name,
+                category=self.category,
+                score=0.0,
+                confidence=1.0,
+                flag=False
+            )
+
+        path = DEFAULT_PATHS.get(
+            viewer.current_path_name
+        )
+
+        if (
+            path is None
+            or
+            viewer.current_waypoint_idx >= len(path.waypoints)
+        ):
+            return SupervisorResult(
+                name=self.name,
+                category=self.category,
+                score=0.0,
+                confidence=1.0,
+                flag=False
+            )
+
+        tx, ty = path.waypoints[
+            viewer.current_waypoint_idx
+        ]
+
+        heading = np.array([
+            tx - viewer.agent_x,
+            ty - viewer.agent_y
+        ], dtype=float)
+
+        norm = np.linalg.norm(heading)
+
+        if norm < 1e-6:
+            return SupervisorResult(
+                name=self.name,
+                category=self.category,
+                score=0.0,
+                confidence=1.0,
+                flag=False
+            )
+
+        heading /= norm
+
+        robot_speed = (
+            path.speed *
+            viewer.agent_speed_factor
+        )
+
+        max_risk = 0.0
+
+        for obj in scene.frame["objects"]:
+
+            cx, cy = world_to_occupancy(
+                *obj["center_world"]
+            )
+
+            vx, vy = obj["velocity_world"]
+
+            for t in np.arange(
+                0,
+                self.HORIZON_SEC,
+                self.DT
+            ):
+
+                robot_pos = np.array([
+                    viewer.agent_x,
+                    viewer.agent_y
+                ]) + heading * robot_speed * t
+
+                forklift_pos = np.array([
+                    cx + vx * t,
+                    cy + vy * t
+                ])
+
+                distance = np.linalg.norm(
+                    robot_pos - forklift_pos
+                )
+
+                risk = max(
+                    0.0,
+                    1.0 -
+                    distance /
+                    self.SAFE_DISTANCE
+                )
+
+                max_risk = max(
+                    max_risk,
+                    risk
+                )
+
+        return SupervisorResult(
+            name=self.name,
+            category=self.category,
+            score=max_risk,
+            confidence=1.0-max_risk,
+            flag=max_risk > 0.50,
+            details={
+                "conflict_probability":
+                    max_risk
+            }
         )
 # ==========================================================
 # ROBOT PATH LIBRARY
@@ -1113,8 +1231,13 @@ class MVPViewer(FigureCanvasQTAgg):
             ManeuverUncertaintySupervisor()
         )
         self.supervisor_manager.register(
+            TrajectoryConflictSupervisor()
+        )
+
+        self.supervisor_manager.register(
             IntersectionOccupancySupervisor()
         )
+        
         self.supervisor_results = []
 
         self.decision_engine = (
@@ -1322,7 +1445,16 @@ class MVPViewer(FigureCanvasQTAgg):
 
             extra={
                 "alert_ood":
-                    self.alert_ood
+                    self.alert_ood,
+
+                "viewer":
+                    self,
+
+                "intersection_center":
+                    (
+                        400,
+                        300
+                    )
             }
         )
 
@@ -1425,7 +1557,12 @@ class MVPViewer(FigureCanvasQTAgg):
         )
 
         if self.current_trust < 0.25:
+            if self.runtime_state != "NORMAL":
 
+                self.agent_speed_factor = min(
+                    self.agent_speed_factor,
+                    0.5
+                )
             self.runtime_state = "UNSAFE"
 
         elif self.current_trust < 0.50:
@@ -1440,21 +1577,80 @@ class MVPViewer(FigureCanvasQTAgg):
 
             self.runtime_state = "NORMAL"
 
-        if self.minimum_ttc < 2:
+        results = {
+            r.name: r
+            for r in self.supervisor_results
+        }
 
-            self.decision_action = "STOP"
+        conflict_risk = (
+            results.get(
+                "trajectory_conflict"
+            ).score
+            if results.get(
+                "trajectory_conflict"
+            )
+            else 0.0
+        )
 
-        elif self.minimum_ttc < 4:
+        intersection_risk = (
+            results.get(
+                "intersection_occupancy"
+            ).score
+            if results.get(
+                "intersection_occupancy"
+            )
+            else 0.0
+        )
 
-            self.decision_action = "YIELD"
+        trust_issue = (
+            self.runtime_state
+            in
+            [
+                "DEGRADED",
+                "WARNING",
+                "UNSAFE"
+            ]
+        )
 
-        elif self.minimum_ttc < 8:
+        #
+        # NORMATIVE ACTION HIERARCHY
+        #
 
-            self.decision_action = "SLOW"
+        if trust_issue:
+
+            self.decision_action = (
+                "DEGRADED_MODE"
+            )
+
+        elif intersection_risk > 0.40:
+
+            self.decision_action = (
+                "WAIT_BEFORE_INTERSECTION"
+            )
+
+        elif conflict_risk > 0.70:
+
+            self.decision_action = (
+                "AVOID_LEFT"
+            )
+
+        elif conflict_risk > 0.50:
+
+            self.decision_action = (
+                "YIELD"
+            )
 
         else:
 
-            self.decision_action = "GO"
+            self.decision_action = (
+                "PROCEED"
+            )
+
+        self.warning_level = "NONE"
+
+        if conflict_risk > 0.5:
+
+            self.warning_level = "WARNING"
 
         self.near_miss = (
 
@@ -1905,7 +2101,21 @@ class MVPViewer(FigureCanvasQTAgg):
     # ==================================================
 
     def update_agent(self):
+        if (
+            self.decision_action
+            ==
+            "AVOID_LEFT"
+        ):
 
+            self.agent_y -= 20
+
+        elif (
+            self.decision_action
+            ==
+            "AVOID_RIGHT"
+        ):
+
+            self.agent_y += 20
         if self.dragging:
             return
 
@@ -2152,15 +2362,17 @@ class MVPViewer(FigureCanvasQTAgg):
         worst_score = -1
 
         for cam in self.relevant_cameras:
-
             scores, keys = load_ood(cam)
 
-            if len(keys) == 0:
+            if not keys:
                 continue
 
-            result = scores.get(
-                str(ts)
+            nearest_key = min(
+                keys,
+                key=lambda k: abs(int(k) - ts)
             )
+
+            result = scores.get(nearest_key)
 
             if result is None:
                 continue
@@ -2168,9 +2380,7 @@ class MVPViewer(FigureCanvasQTAgg):
             score = float(result[0])
 
             if score > worst_score:
-
                 worst_score = score
-
                 self.alert_ood = result
 
         #
