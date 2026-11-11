@@ -825,9 +825,6 @@ class IntersectionOccupancyScenario:
     name = "intersection_occupancy"
     category = "scenario"
 
-    #
-    # Intersection occupancy duration
-    #
     OCCUPANCY_TIME = 3.0
 
     @staticmethod
@@ -860,6 +857,14 @@ class IntersectionOccupancyScenario:
             j = i
 
         return inside
+
+    @staticmethod
+    def poly_center(poly):
+
+        return np.asarray(
+            poly,
+            dtype=float
+        ).mean(axis=0)
 
     @classmethod
     def distance_to_intersection_along_path(
@@ -909,28 +914,21 @@ class IntersectionOccupancyScenario:
 
             seg = p1 - p0
 
-            seg_len = np.linalg.norm(
-                seg
-            )
+            seg_len = np.linalg.norm(seg)
 
             if seg_len < 1e-6:
                 continue
 
-            #
-            # Fast coarse sampling
-            #
-            samples = max(
+            steps = max(
                 2,
                 int(seg_len / 25)
             )
 
-            for k in range(samples + 1):
+            for k in range(steps + 1):
 
                 p = (
                     p0
-                    +
-                    (k / samples)
-                    * seg
+                    + seg * k / steps
                 )
 
                 if cls.point_in_poly(
@@ -940,20 +938,10 @@ class IntersectionOccupancyScenario:
                     return travelled
 
                 travelled += (
-                    seg_len / samples
+                    seg_len / steps
                 )
 
         return np.inf
-
-    @staticmethod
-    def polygon_center(poly):
-
-        poly = np.asarray(
-            poly,
-            dtype=float
-        )
-
-        return poly.mean(axis=0)
 
     def evaluate(self, scene):
 
@@ -991,6 +979,10 @@ class IntersectionOccupancyScenario:
                 details={}
             )
 
+        center = self.poly_center(
+            poly_occ
+        )
+
         #
         # AMR ETA
         #
@@ -1002,35 +994,45 @@ class IntersectionOccupancyScenario:
             )
         )
 
+        if not np.isfinite(
+            robot_distance
+        ):
+            return ScenarioResult(
+                name=self.name,
+                score=0.0,
+                flag=False,
+                details={}
+            )
+
         robot_speed = max(
             0.5,
             viewer.agent_speed_factor
         )
 
         robot_eta = (
-            robot_distance / robot_speed
+            robot_distance /
+            robot_speed
         )
 
         #
-        # Arm only when intersection
-        # is reachable within occupancy horizon.
+        # only care when AMR is nearing
+        # intersection
         #
-        armed = (
-            robot_eta <=
-            self.OCCUPANCY_TIME
-        )
 
-        center = self.polygon_center(
-            poly_occ
-        )
+        if robot_eta > 5.0:
 
-        highest_risk = 0.0
-        conflicting_track = None
+            return ScenarioResult(
+                name=self.name,
+                score=0.0,
+                flag=False,
+                details={
+                    "robot_eta":
+                        float(robot_eta)
+                }
+            )
 
-        frame_preds = prediction_lookup.get(
-            int(scene.timestamp),
-            {}
-        )
+        best_risk = 0.0
+        conflict_track = None
 
         active_track = getattr(
             viewer,
@@ -1050,34 +1052,49 @@ class IntersectionOccupancyScenario:
 
             cx, cy = get_occ_center(obj)
 
-            vx, vy = obj[
-                "velocity_world"
-            ]
+            vx, vy = obj["velocity_world"]
 
-            speed = max(
-                0.2,
-                np.hypot(vx, vy)
+            speed = np.hypot(
+                vx,
+                vy
             )
 
-            obj_distance = np.linalg.norm(
-                np.array(
-                    [cx, cy],
-                    dtype=float
-                )
-                -
+            #
+            # stationary forklift
+            #
+
+            if speed < 0.2:
+                continue
+
+            #
+            # moving toward intersection?
+            #
+
+            to_intersection = (
                 center
+                -
+                np.array(
+                    [cx, cy]
+                )
+            )
+
+            if np.dot(
+                to_intersection,
+                np.array([vx, vy])
+            ) <= 0:
+                continue
+
+            forklift_distance = (
+                np.linalg.norm(
+                    to_intersection
+                )
             )
 
             forklift_eta = (
-                obj_distance
+                forklift_distance
                 /
                 speed
             )
-
-            #
-            # ETA overlap inside
-            # intersection window
-            #
 
             risk = np.clip(
                 1.0
@@ -1095,73 +1112,36 @@ class IntersectionOccupancyScenario:
                 1.0
             )
 
-            pred = frame_preds.get(
-                int(tid)
-            )
+            if risk > best_risk:
 
-            if pred:
-
-                route = pred.get(
-                    "route",
-                    {}
-                )
-
-                risk = max(
-                    risk,
-                    float(
-                        route.get(
-                            "prob",
-                            0.0
-                        )
-                    )
-                )
-
-            if risk > highest_risk:
-
-                highest_risk = risk
-                conflicting_track = tid
+                best_risk = risk
+                conflict_track = tid
 
         return ScenarioResult(
 
             name=self.name,
 
             score=float(
-                highest_risk
-                if armed
-                else 0.0
+                best_risk
             ),
 
             flag=(
-                armed
-                and
-                highest_risk > 0.5
+                best_risk > 0.5
             ),
 
             details={
 
-                "armed":
-                    armed,
-
-                "distance_to_intersection":
-                    float(
-                        robot_distance
-                    ),
-
                 "robot_eta":
-                    float(
-                        robot_eta
-                    ),
+                    float(robot_eta),
 
                 "occupancy_risk":
-                    float(
-                        highest_risk
-                    ),
+                    float(best_risk),
 
                 "conflicting_track":
-                    conflicting_track
+                    conflict_track
             }
         )
-
+        
 class TrajectoryConflictScenario:
 
     name = "trajectory_conflict"
