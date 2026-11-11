@@ -31,6 +31,7 @@ from safety_framework import (
     ManeuverUncertaintySupervisor,
     DecisionEngine
 )
+from dataclasses import dataclass, field
 
 # ==========================================================
 # CONFIG
@@ -71,7 +72,11 @@ OOD_CACHE = {}
 
 MODEL = MLModel.load(MODEL_PATH)
 ENTRY_ELLIPSES = MODEL.entry_ellipses
-
+INTERSECTION_POLY = getattr(
+    MODEL,
+    "intersection_poly",
+    None
+)
 
 # ==========================================================
 # LOAD STATIC DATA
@@ -127,6 +132,7 @@ def build_track_cache(tracks):
 
             wx, wy = obj["center_world"]
             cx, cy = world_to_occupancy(wx, wy)
+            obj["occ_center"] = (cx, cy)
 
             track_hist.setdefault(
                 tid,
@@ -317,6 +323,15 @@ def estimate_track_uncertainty(
 # HELPERS 
 # ==========================================================
 
+def get_occ_center(obj):
+    cached = obj.get("occ_center")
+    if cached is not None:
+        return cached
+
+    wx, wy = obj["center_world"]
+    cached = world_to_occupancy(wx, wy)
+    obj["occ_center"] = cached
+    return cached
 
 def world_to_occupancy(wx, wy):
 
@@ -512,14 +527,6 @@ for frame in pred_data:
     prediction_lookup[ts] = per_track
 
 
-TRACK_HISTORY_IDX = {}
-
-for tid, hist in TRACK_HISTORY.items():
-
-    TRACK_HISTORY_IDX[tid] = np.asarray(
-        [h[0] for h in hist],
-        dtype=np.int32
-    )
 # ==========================================================
 # BBOX UNCERTAINTY MODEL
 # ==========================================================
@@ -690,7 +697,38 @@ def maneuver_uncertainty(
         )
     )
 
+@dataclass
+class ScenarioResult:
 
+    name: str
+
+    score: float
+
+    flag: bool
+
+    details: dict = field(
+        default_factory=dict
+    )
+
+class ScenarioEngine:
+
+    def __init__(self):
+
+        self.scenarios = []
+
+    def register(self, scenario):
+
+        self.scenarios.append(
+            scenario
+        )
+
+    def evaluate(self, scene):
+
+        return [
+            s.evaluate(scene)
+            for s in self.scenarios
+        ]
+    
 class OODSupervisor(Supervisor):
     name = "camera_ood"
     category = "input_anomaly"
@@ -782,153 +820,371 @@ class LegacyTrackUncertaintySupervisor(
             flag=(score > 0.7)
         )
 
-class IntersectionOccupancySupervisor(
-    Supervisor
-):
+class IntersectionOccupancyScenario:
 
     name = "intersection_occupancy"
-    category = "planning"
+    category = "scenario"
 
-    INTERSECTION_RADIUS = 50
-    OCC_TIME = 3.0
+    #
+    # Intersection occupancy duration
+    #
+    OCCUPANCY_TIME = 3.0
+
+    @staticmethod
+    def point_in_poly(point, poly):
+
+        x, y = point
+
+        inside = False
+        j = len(poly) - 1
+
+        for i in range(len(poly)):
+
+            xi, yi = poly[i]
+            xj, yj = poly[j]
+
+            if (
+                ((yi > y) != (yj > y))
+                and
+                (
+                    x <
+                    (xj - xi)
+                    * (y - yi)
+                    /
+                    (yj - yi + 1e-12)
+                    + xi
+                )
+            ):
+                inside = not inside
+
+            j = i
+
+        return inside
+
+    @classmethod
+    def distance_to_intersection_along_path(
+        cls,
+        viewer,
+        poly_occ
+    ):
+
+        path = DEFAULT_PATHS.get(
+            viewer.current_path_name
+        )
+
+        if (
+            path is None
+            or
+            viewer.current_waypoint_idx >=
+            len(path.waypoints)
+        ):
+            return np.inf
+
+        route = [
+            (
+                viewer.agent_x,
+                viewer.agent_y
+            )
+        ]
+
+        route.extend(
+            path.waypoints[
+                viewer.current_waypoint_idx:
+            ]
+        )
+
+        travelled = 0.0
+
+        for i in range(len(route) - 1):
+
+            p0 = np.asarray(
+                route[i],
+                dtype=float
+            )
+
+            p1 = np.asarray(
+                route[i + 1],
+                dtype=float
+            )
+
+            seg = p1 - p0
+
+            seg_len = np.linalg.norm(
+                seg
+            )
+
+            if seg_len < 1e-6:
+                continue
+
+            #
+            # Fast coarse sampling
+            #
+            samples = max(
+                2,
+                int(seg_len / 25)
+            )
+
+            for k in range(samples + 1):
+
+                p = (
+                    p0
+                    +
+                    (k / samples)
+                    * seg
+                )
+
+                if cls.point_in_poly(
+                    p,
+                    poly_occ
+                ):
+                    return travelled
+
+                travelled += (
+                    seg_len / samples
+                )
+
+        return np.inf
+
+    @staticmethod
+    def polygon_center(poly):
+
+        poly = np.asarray(
+            poly,
+            dtype=float
+        )
+
+        return poly.mean(axis=0)
 
     def evaluate(self, scene):
 
-        viewer = scene.extra.get("viewer")
+        viewer = scene.extra.get(
+            "viewer"
+        )
 
-        center = scene.extra.get(
-            "intersection_center"
+        poly_world = scene.extra.get(
+            "intersection_poly"
         )
 
         if (
             viewer is None
-            or center is None
+            or poly_world is None
         ):
-            return SupervisorResult(
+            return ScenarioResult(
                 name=self.name,
-                category=self.category,
                 score=0.0,
-                confidence=1.0,
-                flag=False
+                flag=False,
+                details={}
             )
+
+        poly_occ = world_poly_to_occ(
+            poly_world
+        )
+
+        if (
+            poly_occ is None
+            or len(poly_occ) < 3
+        ):
+            return ScenarioResult(
+                name=self.name,
+                score=0.0,
+                flag=False,
+                details={}
+            )
+
+        #
+        # AMR ETA
+        #
+
+        robot_distance = (
+            self.distance_to_intersection_along_path(
+                viewer,
+                poly_occ
+            )
+        )
 
         robot_speed = max(
             0.5,
             viewer.agent_speed_factor
         )
 
-        robot_distance = np.linalg.norm(
-            np.array(
-                [
-                    viewer.agent_x,
-                    viewer.agent_y
-                ]
-            ) -
-            np.asarray(center)
+        robot_eta = (
+            robot_distance / robot_speed
         )
 
-        robot_entry = (
-            robot_distance /
-            robot_speed
+        #
+        # Arm only when intersection
+        # is reachable within occupancy horizon.
+        #
+        armed = (
+            robot_eta <=
+            self.OCCUPANCY_TIME
         )
 
-        robot_exit = (
-            robot_entry +
-            self.OCC_TIME
+        center = self.polygon_center(
+            poly_occ
         )
 
-        overlap_prob = 0.0
+        highest_risk = 0.0
+        conflicting_track = None
+
+        frame_preds = prediction_lookup.get(
+            int(scene.timestamp),
+            {}
+        )
+
+        active_track = getattr(
+            viewer,
+            "active_track_id",
+            None
+        )
 
         for obj in scene.frame["objects"]:
 
-            cx, cy = world_to_occupancy(
-                *obj["center_world"]
-            )
+            tid = obj["track_id"]
 
-            vx, vy = obj["velocity_world"]
+            if (
+                active_track is not None
+                and tid != active_track
+            ):
+                continue
+
+            cx, cy = get_occ_center(obj)
+
+            vx, vy = obj[
+                "velocity_world"
+            ]
 
             speed = max(
                 0.2,
                 np.hypot(vx, vy)
             )
 
-            dist = np.linalg.norm(
-                np.array([cx, cy]) -
-                np.asarray(center)
+            obj_distance = np.linalg.norm(
+                np.array(
+                    [cx, cy],
+                    dtype=float
+                )
+                -
+                center
             )
 
-            entry = dist / speed
-            exit_ = entry + self.OCC_TIME
-
-            overlap = max(
-                robot_entry,
-                entry
-            ) < min(
-                robot_exit,
-                exit_
+            forklift_eta = (
+                obj_distance
+                /
+                speed
             )
 
-            if overlap:
+            #
+            # ETA overlap inside
+            # intersection window
+            #
 
-                amount = (
-                    min(
-                        robot_exit,
-                        exit_
+            risk = np.clip(
+                1.0
+                -
+                (
+                    abs(
+                        robot_eta
+                        -
+                        forklift_eta
                     )
-                    -
-                    max(
-                        robot_entry,
-                        entry
+                    /
+                    self.OCCUPANCY_TIME
+                ),
+                0.0,
+                1.0
+            )
+
+            pred = frame_preds.get(
+                int(tid)
+            )
+
+            if pred:
+
+                route = pred.get(
+                    "route",
+                    {}
+                )
+
+                risk = max(
+                    risk,
+                    float(
+                        route.get(
+                            "prob",
+                            0.0
+                        )
                     )
                 )
 
-                overlap_prob = max(
-                    overlap_prob,
-                    min(
-                        1.0,
-                        amount /
-                        self.OCC_TIME
-                    )
-                )
+            if risk > highest_risk:
 
-        return SupervisorResult(
+                highest_risk = risk
+                conflicting_track = tid
+
+        return ScenarioResult(
+
             name=self.name,
-            category=self.category,
-            score=float(overlap_prob),
-            confidence=float(
-                1.0-overlap_prob
+
+            score=float(
+                highest_risk
+                if armed
+                else 0.0
             ),
+
             flag=(
-                overlap_prob > 0.4
+                armed
+                and
+                highest_risk > 0.5
             ),
+
             details={
-                "overlap_probability":
-                float(overlap_prob)
+
+                "armed":
+                    armed,
+
+                "distance_to_intersection":
+                    float(
+                        robot_distance
+                    ),
+
+                "robot_eta":
+                    float(
+                        robot_eta
+                    ),
+
+                "occupancy_risk":
+                    float(
+                        highest_risk
+                    ),
+
+                "conflicting_track":
+                    conflicting_track
             }
         )
 
-class TrajectoryConflictSupervisor(Supervisor):
+class TrajectoryConflictScenario:
 
     name = "trajectory_conflict"
-    category = "planning"
-
-    HORIZON_SEC = 8.0
-    DT = 0.25
+    category = "scenario"
 
     SAFE_DISTANCE = 80.0
     CRITICAL_DISTANCE = 40.0
 
+    LOOKAHEAD_POINTS = 10
+
     def evaluate(self, scene):
 
-        viewer = scene.extra.get("viewer")
+        viewer = scene.extra.get(
+            "viewer"
+        )
 
         if viewer is None:
-            return SupervisorResult(
+
+            return ScenarioResult(
                 name=self.name,
-                category=self.category,
                 score=0.0,
-                confidence=1.0,
-                flag=False
+                flag=False,
+                details={}
             )
 
         path = DEFAULT_PATHS.get(
@@ -938,134 +1194,119 @@ class TrajectoryConflictSupervisor(Supervisor):
         if (
             path is None
             or
-            viewer.current_waypoint_idx >= len(path.waypoints)
+            viewer.current_waypoint_idx >=
+            len(path.waypoints)
         ):
-            return SupervisorResult(
+            return ScenarioResult(
                 name=self.name,
-                category=self.category,
                 score=0.0,
-                confidence=1.0,
-                flag=False
+                flag=False,
+                details={}
             )
 
-        tx, ty = path.waypoints[
-            viewer.current_waypoint_idx
+        #
+        # Future AMR route points
+        #
+
+        future_points = [
+            np.array(
+                [
+                    viewer.agent_x,
+                    viewer.agent_y
+                ],
+                dtype=float
+            )
         ]
 
-        robot_heading = np.array(
-            [
-                tx - viewer.agent_x,
-                ty - viewer.agent_y
-            ],
-            dtype=float
+        end_idx = min(
+            len(path.waypoints),
+            viewer.current_waypoint_idx
+            +
+            self.LOOKAHEAD_POINTS
         )
 
-        norm = np.linalg.norm(robot_heading)
+        for i in range(
+            viewer.current_waypoint_idx,
+            end_idx
+        ):
 
-        if norm < 1e-6:
-            return SupervisorResult(
-                name=self.name,
-                category=self.category,
-                score=0.0,
-                confidence=1.0,
-                flag=False
+            future_points.append(
+                np.array(
+                    path.waypoints[i],
+                    dtype=float
+                )
             )
 
-        robot_heading /= norm
-
-        robot_speed = (
-            path.speed *
-            viewer.agent_speed_factor
-        )
-
         highest_risk = 0.0
-        conflict_time = None
-        avoid_side = "LEFT"
+
+        conflict_track = None
+
+        conflict_distance = np.inf
 
         for obj in scene.frame["objects"]:
 
-            cx, cy = world_to_occupancy(
-                *obj["center_world"]
+            tid = obj["track_id"]
+
+            cx, cy = get_occ_center(obj)
+
+            obj_pos = np.array(
+                [cx, cy],
+                dtype=float
             )
 
-            vx, vy = obj["velocity_world"]
-
-            for t in np.arange(
-                0,
-                self.HORIZON_SEC,
-                self.DT
-            ):
-
-                robot_pos = np.array(
-                    [
-                        viewer.agent_x,
-                        viewer.agent_y
-                    ]
-                ) + robot_heading * robot_speed * t
-
-                forklift_pos = np.array(
-                    [
-                        cx + vx * t,
-                        cy + vy * t
-                    ]
-                )
+            for p in future_points:
 
                 d = np.linalg.norm(
-                    robot_pos -
-                    forklift_pos
+                    p - obj_pos
                 )
 
-                if d < self.SAFE_DISTANCE:
+                if d >= self.SAFE_DISTANCE:
+                    continue
 
-                    risk = np.clip(
-                        (
-                            self.SAFE_DISTANCE - d
-                        ) / (
-                            self.SAFE_DISTANCE -
-                            self.CRITICAL_DISTANCE
-                        ),
-                        0.0,
-                        1.0
+                risk = np.clip(
+                    (
+                        self.SAFE_DISTANCE
+                        - d
                     )
+                    /
+                    (
+                        self.SAFE_DISTANCE
+                        - self.CRITICAL_DISTANCE
+                    ),
+                    0.0,
+                    1.0
+                )
 
-                    if risk > highest_risk:
+                if risk > highest_risk:
 
-                        highest_risk = risk
-                        conflict_time = t
+                    highest_risk = risk
+                    conflict_track = tid
+                    conflict_distance = d
 
-                        relative = (
-                            forklift_pos -
-                            robot_pos
-                        )
+        return ScenarioResult(
 
-                        cross = np.cross(
-                            robot_heading,
-                            relative
-                        )
-
-                        avoid_side = (
-                            "RIGHT"
-                            if cross > 0
-                            else "LEFT"
-                        )
-
-        return SupervisorResult(
             name=self.name,
-            category=self.category,
-            score=float(highest_risk),
-            confidence=float(
-                1.0 - highest_risk
+
+            score=float(
+                highest_risk
             ),
+
             flag=(
-                highest_risk > 0.50
+                highest_risk > 0.5
             ),
+
             details={
-                "conflict_probability":
-                    float(highest_risk),
-                "time_to_conflict":
-                    conflict_time,
+
+                "conflicting_track":
+                    conflict_track,
+
+                "minimum_distance":
+                    float(
+                        conflict_distance
+                    ),
+
                 "avoid_side":
-                    avoid_side
+                    "LEFT"
             }
         )
     
@@ -1184,7 +1425,26 @@ def make_rotated_bbox(
     pts[:,1] += cy
 
     return pts
+def world_poly_to_occ(poly):
 
+    if poly is None:
+        return None
+
+    out = []
+
+    for x, y in np.asarray(poly):
+
+        u, v = world_to_occupancy(
+            float(x),
+            float(y)
+        )
+
+        out.append([u, v])
+
+    return np.asarray(
+        out,
+        dtype=float
+    )
 # ==========================================================
 # VIEWER
 # ==========================================================
@@ -1213,11 +1473,20 @@ class MVPViewer(FigureCanvasQTAgg):
         self.entry_markers = []
         self.entry_artists = []
         self.trajectory_artist = None
+        self.object_artists = {}
+        self.text_artists = {}
+        self.velocity_artists = {}
+        self.path_line = None
+        self.path_points = None
+        self.path_target = None        
+        self.intersection_patch = None
+        self.intersection_label = None
 
         self.track_history = {}        
 
         self.frame_idx = 0
         self.draw_entry_points()
+        self.draw_intersection()
 
         self.alert_collision = False
         self.alert_cam = None
@@ -1239,7 +1508,7 @@ class MVPViewer(FigureCanvasQTAgg):
         self.decision_action = "GO"
         self.near_miss = False
         self.failed_test = False
-        self.evidence_log = []
+        self.evidence_log = deque(maxlen=10000)
         self.supervisor_manager = (
             SupervisorManager()
         )
@@ -1267,12 +1536,16 @@ class MVPViewer(FigureCanvasQTAgg):
         self.supervisor_manager.register(
             ManeuverUncertaintySupervisor()
         )
-        self.supervisor_manager.register(
-            TrajectoryConflictSupervisor()
+        self.scenario_engine = (
+            ScenarioEngine()
         )
 
-        self.supervisor_manager.register(
-            IntersectionOccupancySupervisor()
+        self.scenario_engine.register(
+            TrajectoryConflictScenario()
+        )
+
+        self.scenario_engine.register(
+            IntersectionOccupancyScenario()
         )
         
         self.supervisor_results = []
@@ -1340,6 +1613,119 @@ class MVPViewer(FigureCanvasQTAgg):
             self.on_motion
         )
 
+    def draw_intersection(self):
+
+        if INTERSECTION_POLY is None:
+            return
+
+        poly = world_poly_to_occ(
+            INTERSECTION_POLY
+        )
+
+        if poly is None:
+            return
+
+        color = "gold"
+
+        risk = getattr(
+            self,
+            "intersection_risk",
+            0.0
+        )
+
+        if risk > 0.50:
+            color = "red"
+
+        elif risk > 0.20:
+            color = "orange"
+
+        if self.intersection_patch is None:
+
+            self.intersection_patch = self.ax.fill(
+                poly[:,0],
+                poly[:,1],
+                color=color,
+                alpha=0.20,
+                zorder=6
+            )[0]
+
+            x = poly[:,0].mean()
+            y = poly[:,1].mean()
+
+            self.intersection_label = self.ax.text(
+                x,
+                y,
+                "INTERSECTION",
+                color="darkorange",
+                fontsize=10,
+                fontweight="bold",
+                ha="center",
+                va="center",
+                bbox=dict(
+                    facecolor="black",
+                    edgecolor="gold",
+                    alpha=0.7
+                ),
+                zorder=7
+            )
+
+        else:
+
+            self.intersection_patch.set_xy(poly)
+
+            self.intersection_patch.set_color(
+                color
+            )
+
+    def get_object_artist(self, tid):
+        artist = self.object_artists.get(tid)
+
+        if artist is not None:
+            return artist
+
+        outer, = self.ax.plot(
+            [],
+            [],
+            color="orange",
+            lw=1.5,
+            alpha=0.6,
+            zorder=25
+        )
+
+        inner, = self.ax.plot(
+            [],
+            [],
+            color="cyan",
+            lw=2,
+            zorder=30
+        )
+
+        arrow, = self.ax.plot(
+            [],
+            [],
+            color="yellow",
+            lw=2,
+            zorder=35
+        )
+
+        text = self.ax.text(
+            0,
+            0,
+            "",
+            color="yellow",
+            fontsize=8,
+            ha="center"
+        )
+
+        self.object_artists[tid] = (
+            outer,
+            inner,
+            arrow,
+            text
+        )
+
+        return self.object_artists[tid]
+
     def update_avoidance_state(
         self,
         conflict_risk,
@@ -1368,37 +1754,40 @@ class MVPViewer(FigureCanvasQTAgg):
             self.avoidance_side = None
 
         if self.avoidance_active:
-
-            sign = (
-                -1
-                if self.avoidance_side == "LEFT"
-                else 1
-            )
-
-            self.target_lane_offset = (
-                sign * self.avoidance_offset
-            )
-
+            if self.avoidance_side == "LEFT":
+                self.target_lane_offset = -self.avoidance_offset
+            else:
+                self.target_lane_offset = 0.0
         else:
-
             self.target_lane_offset = 0.0
 
-    def get_offset_target(
-        self,
-        tx,
-        ty
-    ):
 
-        dx = tx - self.agent_x
-        dy = ty - self.agent_y
+    def get_offset_target(self, tx, ty):
 
-        dist = np.hypot(dx,dy)
+        path = DEFAULT_PATHS.get(
+            self.current_path_name
+        )
+
+        if (
+            path is None
+            or self.current_waypoint_idx <= 0
+        ):
+            return tx, ty
+
+        px, py = path.waypoints[
+            self.current_waypoint_idx - 1
+        ]
+
+        dx = tx - px
+        dy = ty - py
+
+        dist = np.hypot(dx, dy)
 
         if dist < 1e-6:
-            return tx,ty
+            return tx, ty
 
         nx = -dy / dist
-        ny =  dx / dist
+        ny = dx / dist
 
         return (
             tx + nx * self.current_lane_offset,
@@ -1499,23 +1888,47 @@ class MVPViewer(FigureCanvasQTAgg):
             extra={
                 "alert_ood": self.alert_ood,
                 "viewer": self,
-                "intersection_center": (1000, 200)
+                "intersection_poly": INTERSECTION_POLY
             }
         )
 
         self.supervisor_results = (
-            self.supervisor_manager.evaluate(scene)
+            self.supervisor_manager.evaluate(
+                scene
+            )
         )
 
-        results = {
+        self.scenario_results = (
+            self.scenario_engine.evaluate(
+                scene
+            )
+        )
+
+        trust_results = {
             r.name: r
             for r in self.supervisor_results
         }
 
-        ood = results.get("camera_ood")
-        track = results.get("track_uncertainty")
-        traj = results.get("trajectory_conflict")
-        intersection = results.get("intersection_occupancy")
+        scenario_results = {
+            r.name: r
+            for r in self.scenario_results
+        }
+
+        ood = trust_results.get(
+            "camera_ood"
+        )
+
+        track = trust_results.get(
+            "track_uncertainty"
+        )
+
+        traj = scenario_results.get(
+            "trajectory_conflict"
+        )
+
+        intersection = scenario_results.get(
+            "intersection_occupancy"
+        )
 
         ood_score = getattr(ood, "score", 0.0)
         track_score = getattr(track, "score", 0.0)
@@ -1544,7 +1957,9 @@ class MVPViewer(FigureCanvasQTAgg):
             "score",
             0.0
         )
-
+        self.intersection_risk = (
+            intersection_risk
+        )
         avoid_side = (
             traj.details.get(
                 "avoid_side",
@@ -1635,9 +2050,7 @@ class MVPViewer(FigureCanvasQTAgg):
 
     def compute_ttc(self, obj):
 
-        cx, cy = world_to_occupancy(
-            *obj["center_world"]
-        )
+        cx, cy = get_occ_center(obj)
 
         obj_pos = np.array(
             [cx, cy],
@@ -1807,59 +2220,68 @@ class MVPViewer(FigureCanvasQTAgg):
             self.current_path_name
         )
 
-        if path is None:
-            return
-
-        if len(path.waypoints) < 1:
+        if (
+            path is None
+            or len(path.waypoints) == 0
+        ):
             return
 
         xs = [p[0] for p in path.waypoints]
         ys = [p[1] for p in path.waypoints]
 
-        line, = self.ax.plot(
-            xs,
-            ys,
-            "--",
-            color="yellow",
-            linewidth=2,
-            alpha=0.8,
-            zorder=40
-        )
+        if self.path_line is None:
 
-        self.box_artists.append(line)
+            self.path_line, = self.ax.plot(
+                xs,
+                ys,
+                "--",
+                color="yellow",
+                linewidth=2,
+                alpha=0.8,
+                zorder=40
+            )
 
-        pts = self.ax.scatter(
-            xs,
-            ys,
-            s=60,
-            c="red",
-            zorder=45
-        )
+            self.path_points = self.ax.scatter(
+                xs,
+                ys,
+                s=60,
+                c="red",
+                zorder=45
+            )
 
-        self.box_artists.append(pts)
-
-        #
-        # current target waypoint
-        #
-
-        if (
-            self.current_waypoint_idx < len(path.waypoints)
-        ):
-
-            tx, ty = path.waypoints[
-                self.current_waypoint_idx
-            ]
-
-            target = self.ax.scatter(
-                [tx],
-                [ty],
+            self.path_target = self.ax.scatter(
+                [],
+                [],
                 s=150,
                 c="lime",
                 marker="*",
                 zorder=50
             )
 
-            self.box_artists.append(target)
+        else:
+
+            self.path_line.set_data(
+                xs,
+                ys
+            )
+
+            self.path_points.set_offsets(
+                np.c_[xs, ys]
+            )
+
+        if (
+            self.current_waypoint_idx
+            < len(path.waypoints)
+        ):
+
+            tx, ty = path.waypoints[
+                self.current_waypoint_idx
+            ]
+
+            self.path_target.set_offsets(
+                [[tx, ty]]
+            )
+
 
     def draw_entry_points(self):
 
@@ -2134,6 +2556,51 @@ class MVPViewer(FigureCanvasQTAgg):
 
             if step == dist:
                 self.current_waypoint_idx += 1
+        if abs(self.current_lane_offset) < 0.5:
+
+            path = DEFAULT_PATHS.get(
+                self.current_path_name
+            )
+
+            if (
+                path is not None
+                and self.current_waypoint_idx > 0
+                and self.current_waypoint_idx < len(path.waypoints)
+            ):
+
+                p0 = np.array(
+                    path.waypoints[
+                        self.current_waypoint_idx - 1
+                    ],
+                    dtype=float
+                )
+
+                p1 = np.array(
+                    path.waypoints[
+                        self.current_waypoint_idx
+                    ],
+                    dtype=float
+                )
+
+                seg = p1 - p0
+                seg_len2 = np.dot(seg, seg)
+
+                if seg_len2 > 1e-6:
+
+                    pos = np.array(
+                        [self.agent_x, self.agent_y]
+                    )
+
+                    t = np.clip(
+                        np.dot(pos - p0, seg) / seg_len2,
+                        0.0,
+                        1.0
+                    )
+
+                    proj = p0 + t * seg
+
+                    self.agent_x = float(proj[0])
+                    self.agent_y = float(proj[1])                
     # ==================================================
     # Main frame update
     # ==================================================
@@ -2361,9 +2828,7 @@ class MVPViewer(FigureCanvasQTAgg):
 
         for obj in objects:
 
-            cx, cy = world_to_occupancy(
-                *obj["center_world"]
-            )
+            cx, cy = get_occ_center(obj)
 
             d = math.hypot(
                 cx - self.agent_x,
@@ -2506,7 +2971,7 @@ class MVPViewer(FigureCanvasQTAgg):
 
     def draw_objects(self, frame):
 
-        self.track_ids_current.clear()
+        visible = set()
 
         active = self.active_track_id
 
@@ -2514,29 +2979,16 @@ class MVPViewer(FigureCanvasQTAgg):
 
             tid = obj["track_id"]
 
-            self.track_ids_current.append(
-                tid
-            )
+            visible.add(tid)
 
-            cx, cy = world_to_occupancy(
-                *obj["center_world"]
-            )
+            cx, cy = get_occ_center(obj)
 
-            angle = float(
-                obj["angle"]
-            )
+            angle = float(obj["angle"])
 
-            width = float(
-                obj["bbox_width"]
-            )
+            width = float(obj["bbox_width"])
+            length = float(obj["bbox_length"])
 
-            length = float(
-                obj["bbox_length"]
-            )
-
-            expand_l, expand_w = (
-                uncertainty_bbox(tid)
-            )
+            expand_l, expand_w = uncertainty_bbox(tid)
 
             inner_box = make_rotated_bbox(
                 cx,
@@ -2554,62 +3006,91 @@ class MVPViewer(FigureCanvasQTAgg):
                 angle
             )
 
+            outer_artist, inner_artist, arrow_artist, text_artist = (
+                self.get_object_artist(tid)
+            )
+
+            outer_artist.set_data(
+                outer_box[:,0],
+                outer_box[:,1]
+            )
+
+            inner_artist.set_data(
+                inner_box[:,0],
+                inner_box[:,1]
+            )
+
             is_active = (
                 tid == active
             )
 
-            self.draw_bbox(
-                outer_box,
-                color="orange",
-                lw=1.5,
-                alpha=0.6,
-                zorder=25
+            inner_artist.set_color(
+                "lime"
+                if is_active
+                else "cyan"
             )
 
-            self.draw_bbox(
-                inner_box,
-                color=(
-                    "lime"
-                    if is_active
-                    else "cyan"
-                ),
-                lw=(
-                    3
-                    if is_active
-                    else 2
-                ),
-                zorder=30
+            inner_artist.set_linewidth(
+                3 if is_active else 2
             )
 
-            vx, vy = obj[
-                "velocity_world"
-            ]
+            vx, vy = obj["velocity_world"]
 
-            if np.hypot(vx, vy) > 0.05:
+            if np.hypot(vx,vy) > 0.05:
 
-                self.draw_velocity_arrow(
-                    cx,
-                    cy,
-                    angle
+                hx = (
+                    cx +
+                    40*np.cos(
+                        np.deg2rad(angle)
+                    )
                 )
 
-            txt = self.ax.text(
-                cx,
-                cy,
-                str(tid),
-                color="yellow",
-                fontsize=8,
-                ha="center"
+                hy = (
+                    cy +
+                    40*np.sin(
+                        np.deg2rad(angle)
+                    )
+                )
+
+                arrow_artist.set_data(
+                    [cx,hx],
+                    [cy,hy]
+                )
+
+                arrow_artist.set_visible(True)
+
+            else:
+
+                arrow_artist.set_visible(False)
+
+            text_artist.set_position(
+                (cx,cy)
             )
 
-            self.add_artist(txt)
+            text_artist.set_text(
+                str(tid)
+            )
+
+            text_artist.set_visible(True)
+
+        #
+        # hide objects not visible
+        #
+
+        for tid, artists in self.object_artists.items():
+
+            state = (
+                tid in visible
+            )
+
+            for a in artists:
+                a.set_visible(state)
+
+        self.track_ids_current = list(visible)
 
     def clear_artists(self):
+        pass
 
-        for a in self.box_artists:
-            a.remove()
-
-        self.box_artists.clear()
 
     def load_bev_image(self, timestamp):
 
