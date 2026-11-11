@@ -1,0 +1,290 @@
+{
+  "scenario": "Scenario 1 candidate windows",
+  "selection_method": "Diverse recorded outside-to-inside forklift transitions near the defined intersection",
+  "windows": [
+    {
+      "focus_track_id": 16,
+      "entry_frame": 5659,
+      "exit_frame": 5707,
+      "window_start_frame": 5629,
+      "window_end_frame": 5737,
+      "entry_timestamp": 1746007557418,
+      "exit_timestamp": 1746007562218,
+      "inside_duration_frames": 48,
+      "inside_duration_s": 4.8,
+      "entry_side": "north",
+      "exit_side": "west",
+      "route": {
+        "from": 3,
+        "to": 1,
+        "confidence": 0.8879182515159004,
+        "uncertainty": 0.11208174848409957
+      },
+      "maneuver": "moving",
+      "nearby_forklift_ids": [
+        15,
+        16,
+        17,
+        18
+      ],
+      "nearby_forklift_count": 4,
+      "peak_concurrent_forklifts": 4,
+      "id": "scenario_1_window_01",
+      "diversity_summary": "north\u2192west; medium (2\u20136 s); route 3\u21921; peak 4 nearby forklifts"
+    },
+    {
+      "focus_track_id": 59,
+      "entry_frame": 17793,
+      "exit_frame": 18033,
+      "window_start_frame": 17763,
+      "window_end_frame": 18063,
+      "entry_timestamp": 1746008770818,
+      "exit_timestamp": 1746008794818,
+      "inside_duration_frames": 240,
+      "inside_duration_s": 24.0,
+      "entry_side": "south",
+      "exit_side": "south",
+      "route": {
+        "from": 1,
+        "to": 1,
+        "confidence": 0.9820032096969576,
+        "uncertainty": 0.017996790303042354
+      },
+      "maneuver": "moving",
+      "nearby_forklift_ids": [
+        58,
+        59,
+        60
+      ],
+      "nearby_forklift_count": 3,
+      "peak_concurrent_forklifts": 2,
+      "id": "scenario_1_window_02",
+      "diversity_summary": "south\u2192south; long (\u22656 s); route 1\u21921; peak 2 nearby forklifts"
+    },
+    {
+      "focus_track_id": 48,
+      "entry_frame": 11909,
+      "exit_frame": 11921,
+      "window_start_frame": 11879,
+      "window_end_frame": 11951,
+      "entry_timestamp": 1746008182418,
+      "exit_timestamp": 1746008183618,
+      "inside_duration_frames": 12,
+      "inside_duration_s": 1.2,
+      "entry_side": "east",
+      "exit_side": "north",
+      "route": {
+        "from": 0,
+        "to": 0,
+        "confidence": 0.5161351070241107,
+        "uncertainty": 0.4838648929758893
+      },
+      "maneuver": "moving",
+      "nearby_forklift_ids": [
+        48
+      ],
+      "nearby_forklift_count": 1,
+      "peak_concurrent_forklifts": 1,
+      "id": "scenario_1_window_03",
+      "diversity_summary": "east\u2192north; short (<2 s); route 0\u21920; peak 1 nearby forklifts"
+    },
+    {
+      "focus_track_id": 120,
+      "entry_frame": 31113,
+      "exit_frame": 31154,
+      "window_start_frame": 31083,
+      "window_end_frame": 31184,
+      "entry_timestamp": 1746010102818,
+      "exit_timestamp": 1746010106918,
+      "inside_duration_frames": 41,
+      "inside_duration_s": 4.1,
+      "entry_side": "west",
+      "exit_side": "south",
+      "route": {
+        "from": 0,
+        "to": 1,
+        "confidence": 0.7689697847994251,
+        "uncertainty": 0.23103021520057487
+      },
+      "maneuver": "moving",
+      "nearby_forklift_ids": [
+        120,
+        122,
+        124
+      ],
+      "nearby_forklift_count": 3,
+      "peak_concurrent_forklifts": 3,
+      "id": "scenario_1_window_04",
+      "diversity_summary": "west\u2192south; medium (2\u20136 s); route 0\u21921; peak 3 nearby forklifts"
+    },
+    {
+      "focus_track_id": 73,
+      "entry_frame": 21945,
+      "exit_frame": 22006,
+      "window_start_frame": 21915,
+      "window_end_frame": 22036,
+      "entry_timestamp": 1746009186018,
+      "exit_timestamp": 1746009192118,
+      "inside_duration_frames": 61,
+      "inside_duration_s": 6.1,
+      "entry_side": "north",
+      "exit_side": "south",
+      "route": {
+        "from": 2,
+        "to": 1,
+        "confidence": 0.9800738669523211,
+        "uncertainty": 0.019926133047678873
+      },
+      "maneuver": "moving",
+      "nearby_forklift_ids": [
+        69,
+        72,
+        73,
+        74
+      ],
+      "nearby_forklift_count": 4,
+      "peak_concurrent_forklifts": 3,
+      "id": "scenario_1_window_05",
+      "diversity_summary": "north\u2192south; long (\u22656 s); route 2\u21921; peak 3 nearby forklifts"
+    },
+    {
+      "focus_track_id": 30,
+      "entry_frame": 6630,
+      "exit_frame": 6678,
+      "window_start_frame": 6600,
+      "window_end_frame": 6708,
+      "entry_timestamp": 1746007654518,
+      "exit_timestamp": 1746007659318,
+      "inside_duration_frames": 48,
+      "inside_duration_s": 4.8,
+      "entry_side": "north",
+      "exit_side": "south",
+      "route": {
+        "from": 4,
+        "to": 1,
+        "confidence": 0.816389384538164,
+        "uncertainty": 0.183610615461836
+      },
+      "maneuver": "moving",
+      "nearby_forklift_ids": [
+        28,
+        29,
+        30
+      ],
+      "nearby_forklift_count": 3,
+      "peak_concurrent_forklifts": 3,
+      "id": "scenario_1_window_06",
+      "diversity_summary": "north\u2192south; medium (2\u20136 s); route 4\u21921; peak 3 nearby forklifts"
+    },
+    {
+      "focus_track_id": 31,
+      "entry_frame": 6990,
+      "exit_frame": 7051,
+      "window_start_frame": 6960,
+      "window_end_frame": 7081,
+      "entry_timestamp": 1746007690518,
+      "exit_timestamp": 1746007696618,
+      "inside_duration_frames": 61,
+      "inside_duration_s": 6.1,
+      "entry_side": "south",
+      "exit_side": "north",
+      "route": {
+        "from": 1,
+        "to": 2,
+        "confidence": 0.7693971392810228,
+        "uncertainty": 0.23060286071897718
+      },
+      "maneuver": "moving",
+      "nearby_forklift_ids": [
+        0,
+        31
+      ],
+      "nearby_forklift_count": 2,
+      "peak_concurrent_forklifts": 2,
+      "id": "scenario_1_window_07",
+      "diversity_summary": "south\u2192north; long (\u22656 s); route 1\u21922; peak 2 nearby forklifts"
+    },
+    {
+      "focus_track_id": 39,
+      "entry_frame": 8933,
+      "exit_frame": 8945,
+      "window_start_frame": 8903,
+      "window_end_frame": 8975,
+      "entry_timestamp": 1746007884818,
+      "exit_timestamp": 1746007886018,
+      "inside_duration_frames": 12,
+      "inside_duration_s": 1.2,
+      "entry_side": "north",
+      "exit_side": "north",
+      "route": {
+        "from": 3,
+        "to": 2,
+        "confidence": 0.7234620910726037,
+        "uncertainty": 0.27653790892739627
+      },
+      "maneuver": "moving",
+      "nearby_forklift_ids": [
+        39,
+        45
+      ],
+      "nearby_forklift_count": 2,
+      "peak_concurrent_forklifts": 2,
+      "id": "scenario_1_window_08",
+      "diversity_summary": "north\u2192north; short (<2 s); route 3\u21922; peak 2 nearby forklifts"
+    },
+    {
+      "focus_track_id": 41,
+      "entry_frame": 8561,
+      "exit_frame": 8612,
+      "window_start_frame": 8531,
+      "window_end_frame": 8642,
+      "entry_timestamp": 1746007847618,
+      "exit_timestamp": 1746007852718,
+      "inside_duration_frames": 51,
+      "inside_duration_s": 5.1,
+      "entry_side": "south",
+      "exit_side": "north",
+      "route": {
+        "from": 1,
+        "to": 4,
+        "confidence": 0.40278357630263867,
+        "uncertainty": 0.5972164236973614
+      },
+      "maneuver": "moving",
+      "nearby_forklift_ids": [
+        41
+      ],
+      "nearby_forklift_count": 1,
+      "peak_concurrent_forklifts": 1,
+      "id": "scenario_1_window_09",
+      "diversity_summary": "south\u2192north; medium (2\u20136 s); route 1\u21924; peak 1 nearby forklifts"
+    },
+    {
+      "focus_track_id": 46,
+      "entry_frame": 9498,
+      "exit_frame": 9533,
+      "window_start_frame": 9468,
+      "window_end_frame": 9563,
+      "entry_timestamp": 1746007941318,
+      "exit_timestamp": 1746007944818,
+      "inside_duration_frames": 35,
+      "inside_duration_s": 3.5,
+      "entry_side": "west",
+      "exit_side": "north",
+      "route": {
+        "from": 0,
+        "to": 2,
+        "confidence": 0.5443572654430788,
+        "uncertainty": 0.45564273455692117
+      },
+      "maneuver": "moving",
+      "nearby_forklift_ids": [
+        46
+      ],
+      "nearby_forklift_count": 1,
+      "peak_concurrent_forklifts": 1,
+      "id": "scenario_1_window_10",
+      "diversity_summary": "west\u2192north; medium (2\u20136 s); route 0\u21922; peak 1 nearby forklifts"
+    }
+  ]
+}

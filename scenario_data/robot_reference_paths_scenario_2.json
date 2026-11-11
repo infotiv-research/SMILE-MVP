@@ -1,0 +1,162 @@
+{
+  "Path_1": {
+    "speed": 2.0,
+    "start_frame": 0,
+    "end_frame": null,
+    "associated_track": null,
+    "waypoints": [
+      [
+        21.15058226866732,
+        243.88472534039715
+      ],
+      [
+        850.9839290617481,
+        235.0000000000001
+      ]
+    ]
+  },
+  "Path_2": {
+    "speed": 2.0,
+    "start_frame": 0,
+    "end_frame": null,
+    "associated_track": null,
+    "waypoints": [
+      [
+        15.819747064429109,
+        187.02248316185626
+      ],
+      [
+        858.0917093340656,
+        188.79942822993576
+      ]
+    ]
+  },
+  "Path_3": {
+    "speed": 2.0,
+    "start_frame": 0,
+    "end_frame": null,
+    "associated_track": null,
+    "waypoints": [
+      [
+        24.70447240482612,
+        217.23054931920615
+      ],
+      [
+        856.3147642659862,
+        213.67665918304738
+      ]
+    ]
+  },
+  "Path_4": {
+    "speed": 2.0,
+    "start_frame": 0,
+    "end_frame": null,
+    "associated_track": null,
+    "waypoints": [
+      [
+        680.3972025261255,
+        78.62883400901273
+      ],
+      [
+        1488.9072085022533,
+        94.62133962172743
+      ]
+    ]
+  },
+  "Path_5": {
+    "speed": 2.0,
+    "start_frame": 0,
+    "end_frame": null,
+    "associated_track": null,
+    "waypoints": [
+      [
+        676.8433123899666,
+        25.320481966630723
+      ],
+      [
+        1496.0149887745708,
+        44.86687771550419
+      ]
+    ]
+  },
+  "Path_6": {
+    "speed": 2.0,
+    "start_frame": 0,
+    "end_frame": null,
+    "associated_track": null,
+    "waypoints": [
+      [
+        680.3972025261255,
+        51.97465798782173
+      ],
+      [
+        1488.9072085022533,
+        71.5210537366952
+      ]
+    ]
+  },
+  "Path_7": {
+    "speed": 2.0,
+    "start_frame": 0,
+    "end_frame": null,
+    "associated_track": null,
+    "waypoints": [
+      [
+        58.46642869833475,
+        240.33083520423838
+      ],
+      [
+        849.2069839936686,
+        235.0000000000001
+      ]
+    ]
+  },
+  "Path_8": {
+    "speed": 2.0,
+    "start_frame": 0,
+    "end_frame": null,
+    "associated_track": null,
+    "waypoints": [
+      [
+        60.243373766414166,
+        217.23054931920615
+      ],
+      [
+        856.3147642659862,
+        217.23054931920615
+      ]
+    ]
+  },
+  "Path_9": {
+    "speed": 2.0,
+    "start_frame": 0,
+    "end_frame": null,
+    "associated_track": null,
+    "waypoints": [
+      [
+        62.02031883449355,
+        190.57637329801514
+      ],
+      [
+        850.9839290617481,
+        190.57637329801514
+      ]
+    ]
+  },
+  "Path_10": {
+    "speed": 2.0,
+    "start_frame": 0,
+    "end_frame": null,
+    "associated_track": null,
+    "waypoints": [
+      [
+        69.12809910681118,
+        217.23054931920615
+      ],
+      [
+        840.3222586532717,
+        213.67665918304738
+      ]
+    ]
+  }
+}
