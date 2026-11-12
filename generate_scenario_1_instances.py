@@ -7,7 +7,7 @@ manoeuvre classifications and OOD data remain tied to original timestamps.
 
 import json
 import math
-from collections import deque
+from collections import defaultdict, deque
 from pathlib import Path
 
 from shapely.geometry import LineString, Point, Polygon
@@ -652,6 +652,29 @@ def build_instance(window_index, path_index, candidate, frames, predictions, int
     }
 
 
+def normalise_window_frames(instances):
+    """Use one complete recorded sequence for every path in a time window.
+
+    Route variants may require different amounts of post-route context.  The
+    longest extracted sequence is therefore the shared selected window.  This
+    keeps parallel visualisation meaningful and guarantees every offline robot
+    evaluation has one action and one position for every displayed frame.
+    """
+    groups = defaultdict(list)
+    for instance in instances:
+        groups[instance["window_id"]].append(instance)
+    for window_id, variants in groups.items():
+        canonical = max(variants, key=lambda item: len(item["frames"]))
+        frames = canonical["frames"]
+        start = frames[0]["source_frame_index"]
+        end = frames[-1]["source_frame_index"]
+        for instance in variants:
+            instance["frames"] = list(frames)
+            instance["source_window"]["start_frame"] = start
+            instance["source_window"]["end_frame"] = end
+            instance["source_window"]["canonical_window_id"] = window_id
+
+
 def main():
     area_data = json.load((REPO_ROOT / "scenario_data/intersection_area.json").open())
     intersection_points = area_data["polygon_image_px"]
@@ -694,6 +717,7 @@ def main():
         for window_index, candidate in enumerate(candidates)
         for path_index, route in enumerate(routes_by_window[window_index])
     ]
+    normalise_window_frames(instances)
     payload = {
         "scenario": "Scenario 1: Robot Operation at Intersections",
         "data_provenance": "Recorded forklift detections, predictions and timestamps; simulated AMR path only.",

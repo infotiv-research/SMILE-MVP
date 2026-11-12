@@ -7,6 +7,13 @@ import numpy as np
 import math
 from pathlib import Path
 
+# Scenario replay is deliberately isolated from the ordinary MVP viewer.  The
+# default invocation below follows the existing initialization/layout exactly.
+if "--scenario" in sys.argv:
+    sys.argv.remove("--scenario")
+    from scenario_replay_viewer import run as run_scenario_replay_viewer
+    sys.exit(run_scenario_replay_viewer())
+
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
@@ -484,17 +491,24 @@ mask_file = mask_lookup.get(first_ts)
 
 if mask_file is None:
 
-    raise RuntimeError(
-        f"No BEV image for timestamp {first_ts}"
+    # Scenario-behaviour precomputation executes the existing supervisor
+    # headlessly and never renders BEV frames.  Keep the normal viewer strict,
+    # but permit that explicit mode without requiring an image from the same
+    # recording timestamp range.
+    if os.environ.get("TUVE_HEADLESS_REPLAY") == "1":
+        mask0 = np.zeros((600, 1500), dtype=np.uint8)
+    else:
+        raise RuntimeError(
+            f"No BEV image for timestamp {first_ts}"
+        )
+else:
+    mask0 = cv2.imread(
+        os.path.join(
+            MASK_FOLDER,
+            mask_file
+        ),
+        cv2.IMREAD_GRAYSCALE
     )
-
-mask0 = cv2.imread(
-    os.path.join(
-        MASK_FOLDER,
-        mask_file
-    ),
-    cv2.IMREAD_GRAYSCALE
-)
 
 H, W = mask0.shape
 

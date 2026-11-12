@@ -101,6 +101,7 @@ their generated JSON and reports to the scenario folders:
 ```bash
 python generate_scenario_1_instances.py
 python generate_scenario_2_instances.py
+python precompute_scenario_behaviors.py
 ```
 
 Generated uncompressed replay files are written to:
@@ -113,3 +114,37 @@ sharing. The reports describing intended instance coverage are in:
 
 - `scenario_output/scenario_1_instance_classification.md`
 - `scenario_output/scenario_2_instance_classification.md`
+
+### Precompute replay behaviour
+
+`precompute_scenario_behaviors.py` is a headless harness for the existing
+`tuve_mvp_2026_04_16.py` implementation. It installs each extracted replay as
+the MVP viewer's current data/path and calls its existing prediction lookup,
+scene-risk evaluation, and robot-motion methods. It does **not** implement or
+modify supervisor policy.
+
+The script writes the compressed replay artifacts consumed by `--scenario`.
+All variants of a selected window are first normalised to the same recorded
+frame sequence. A completed path is held at its endpoint for remaining replay
+frames and marked `GOAL_REACHED` for display.
+
+## Visualize a scenario replay
+
+The regular MVP viewer is unchanged. Use the explicit `--scenario` flag to
+launch the separate, read-only scenario replay interface:
+
+```bash
+python tuve_mvp_2026_04_16.py --scenario
+```
+
+This is the default live mode: each AMR is stepped through the existing MVP
+supervisor during playback. For faster cache-only playback, use:
+
+```bash
+python tuve_mvp_2026_04_16.py --scenario --precomputed
+```
+
+This interface reads the compressed instance artifacts in `scenario_data/` and
+provides separate controls for Scenario 1/2, recorded time window, and either
+one robot instance or all robot instances in parallel. It does not alter the
+normal MVP viewer layout or normal viewer behavior.
