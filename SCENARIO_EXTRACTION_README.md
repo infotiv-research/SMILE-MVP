@@ -1,8 +1,21 @@
-# Scenario window extraction
+# Scenario replay integration
 
 This integration contains the data definitions and scripts needed to identify
 recorded forklift windows for Scenario 1 (intersection operation) and Scenario
-2 (operation outside intersections).
+2 (operation outside intersections), attach approved AMR routes, evaluate them
+with the existing MVP supervisor, and replay them in a separate scenario UI.
+
+## What this adds
+
+- Dataset-backed Scenario 1 and Scenario 2 candidate-window extraction.
+- Scenario instances: ten AMR route variants for each selected recorded
+  forklift window.
+- A headless precompute harness that runs the existing MVP supervisor; it does
+  not add or modify any robot safety, TTC, OOD, or decision logic.
+- `--scenario` replay mode, including live evaluation by default and optional
+  cache-only playback.
+
+The default `python tuve_mvp_2026_04_16.py` viewer remains unchanged.
 
 ## Repository artifacts
 
@@ -13,6 +26,26 @@ recorded forklift windows for Scenario 1 (intersection operation) and Scenario
 - `scenario_data/scenario_1_candidate_windows.json` — selected Scenario 1 windows.
 - `scenario_data/scenario_2_candidate_windows.json` — selected Scenario 2 windows.
 - `scenario_output/` — human-readable window inventories created by the scripts.
+
+## Factory geometry: operating area and intersection
+
+Two user-defined polygons make the scenario definitions spatially explicit:
+
+- `intersection_area.json` defines the Scenario 1 intersection. Its image
+  polygon is used to identify recorded forklift entries and to verify that
+  Scenario 1 AMR routes cross the intersection.
+- `robot_operating_area.json` defines the permitted AMR area. Scenario 1 route
+  selection rejects reference paths outside this polygon.
+
+Each file stores the source BEV image, image dimensions, the polygon in BEV
+pixels (`polygon_image_px`), and its ground-plane counterpart in metres
+(`polygon_ground_world_m`, with `z=0`). Keep both representations consistent
+when redefining an area. The scenario viewer overlays both polygons: green for
+the operating area and cyan for the intersection.
+
+Reference routes are stored separately in `robot_reference_paths.json` for
+Scenario 1 and `robot_reference_paths_scenario_2.json` for Scenario 2. They
+are user-approved AMR geometry; forklifts remain entirely recorded data.
 
 ## Prerequisites
 
