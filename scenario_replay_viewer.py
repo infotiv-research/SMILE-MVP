@@ -38,6 +38,18 @@ def resolve_path(value):
     path = Path(value)
     return path if path.is_absolute() else ROOT / path
 
+def load_mvp_paths(config):
+    path_db = (
+        resolve_path(config["paths"]["dataset_root"])
+        / config["extra_paths"]["robot_paths"]
+    )
+
+    if not path_db.exists():
+        return {}
+
+    with open(path_db, "r") as f:
+        return json.load(f)
+
 
 def load_config():
     with (ROOT / "mvp-config.json").open() as source:
@@ -110,7 +122,10 @@ class ReplayCanvas(FigureCanvasQTAgg):
         positions = cached.get("positions", [])
         if positions:
             return positions[min(index, len(positions) - 1)]
-        path = instance.get("robot_path", [])
+        path = instance.get(
+            "_resolved_robot_path",
+            instance.get("robot_path", [])
+        )
         return path[-1] if path else [0.0, 0.0]
 
     @staticmethod
@@ -185,6 +200,7 @@ class ScenarioReplayWindow(QMainWindow):
         self.setWindowTitle("TUVE MVP — Scenario Replay")
         self.resize(1450, 900)
         self.config = load_config()
+        self.mvp_paths = load_mvp_paths(self.config)
         scenario_paths = self.config["scenario_paths"]
         self.intersection = load_polygon(resolve_path(scenario_paths["intersection_area"]))
         self.operating_area = load_polygon(resolve_path(scenario_paths["robot_operating_area"]))
@@ -239,6 +255,23 @@ class ScenarioReplayWindow(QMainWindow):
         self.slider.valueChanged.connect(self.seek)
         self.populate_windows()
 
+    def resolve_robot_path(self, instance):
+        label = instance.get("robot_path_label")
+
+        if (
+            label
+            and label in self.mvp_paths
+        ):
+            waypoints = self.mvp_paths[label].get(
+                "waypoints",
+                []
+            )
+
+            if len(waypoints) >= 2:
+                return waypoints
+
+        return instance.get("robot_path", [])
+
     def instances_for_window(self):
         window_id = self.window_select.currentData()
         return [item for item in self.payloads[self.scenario_select.currentText()]["instances"]
@@ -275,6 +308,10 @@ class ScenarioReplayWindow(QMainWindow):
         instances = self.selected_instances()
         maximum = max(len(item.get("frames", [])) for item in instances) - 1
         self.slider.blockSignals(True); self.slider.setRange(0, max(0, maximum)); self.slider.setValue(0); self.slider.blockSignals(False)
+        for instance in instances:
+            instance["_resolved_robot_path"] = (
+                self.resolve_robot_path(instance)
+            )        
         self.render()
 
     def render(self):

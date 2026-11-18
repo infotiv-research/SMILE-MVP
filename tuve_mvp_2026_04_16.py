@@ -1344,7 +1344,24 @@ def save_paths():
             f,
             indent=2
         )
+def remove_duplicate_waypoints(waypoints, eps=1e-6):
+    if not waypoints:
+        return []
 
+    cleaned = [tuple(waypoints[0])]
+
+    for pt in waypoints[1:]:
+        prev = cleaned[-1]
+
+        if (
+            abs(pt[0] - prev[0]) > eps
+            or
+            abs(pt[1] - prev[1]) > eps
+        ):
+            cleaned.append(tuple(pt))
+
+    return cleaned
+    
 def load_paths():
     if not os.path.exists(PATH_DB):
         return
@@ -1369,13 +1386,15 @@ def load_paths():
             "associated_track",
             None
         )
-        path.waypoints = [
-            tuple(x)
-            for x in p.get(
-                "waypoints",
-                []
-            )
-        ]
+        path.waypoints = remove_duplicate_waypoints(
+            [
+                tuple(x)
+                for x in p.get(
+                    "waypoints",
+                    []
+                )
+            ]
+        )
         DEFAULT_PATHS[name] = path
 
 load_paths()
@@ -2699,7 +2718,6 @@ class MVPViewer(FigureCanvasQTAgg):
             self.current_waypoint_idx,
             len(path.waypoints)
         ):
-
             tx, ty = path.waypoints[idx]
 
             seg_len = math.hypot(
@@ -2709,6 +2727,12 @@ class MVPViewer(FigureCanvasQTAgg):
 
             if remaining <= 0:
                 break
+
+            # Skip duplicate / degenerate waypoints
+            if seg_len < 1e-6:
+                px = tx
+                py = ty
+                continue
 
             use_len = min(
                 seg_len,
@@ -2720,18 +2744,14 @@ class MVPViewer(FigureCanvasQTAgg):
                 int(use_len / 20)
             )
 
-            for k in range(samples + 1):
+            ratio = use_len / seg_len
 
-                a = (
-                    k / samples
-                ) * (
-                    use_len / seg_len
-                )
+            for k in range(samples + 1):
+                a = (k / samples) * ratio
 
                 sx = px + a * (
                     tx - px
                 )
-
                 sy = py + a * (
                     ty - py
                 )
@@ -2742,12 +2762,9 @@ class MVPViewer(FigureCanvasQTAgg):
                         sx
                     )
                 ):
-                    cameras.add(
-                        str(cam)
-                    )
+                    cameras.add(str(cam))
 
             remaining -= use_len
-
             px = tx
             py = ty
 
