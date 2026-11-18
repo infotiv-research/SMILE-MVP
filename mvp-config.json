@@ -1,7 +1,7 @@
 {
   "paths": {
     "dataset_root": "Data",
-    "mask_folder": "bev_img/bev_img",
+    "mask_folder": "confidential_tuve_dataset/bev_img",
     "dataset_config_file": "dataset_config.json",
     "camera_folder": "",
     "ood_root": "ood_detections",
@@ -33,7 +33,7 @@
     "default_height": 360
   },
   "extra_paths": {
-    "mask_folder": "bev_res/bev_res",
+    "mask_folder": "confidential_tuve_dataset/bev_img",
     "predictions": "../JSON-data/predictions_2026_02_27.json",
     "occupancy_projection": "occupancy_projection.pkl",
     "robot_paths": "../JSON-data/robot_paths.json",

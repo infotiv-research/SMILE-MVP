@@ -20,6 +20,9 @@ REPORT = path("scenario_2_candidate_report")
 WINDOW_HALF = 50  # five seconds at 10 Hz
 OUTSIDE_DISTANCE_PX = 180.0
 MIN_GLOBAL_SEPARATION = 300
+# Window 07 contains a late manoeuvre of interest. Retain three additional
+# seconds after the standard 10-second candidate window so replay includes it.
+WINDOW_POST_EXTENSIONS = {"scenario_2_window_07": 30}
 
 
 def polygon(obj):
@@ -123,6 +126,9 @@ def main():
         raise RuntimeError("Only selected {} Scenario 2 windows".format(len(selected)))
     for index, candidate in enumerate(selected, 1):
         candidate["id"] = "scenario_2_window_{:02d}".format(index)
+        candidate["window_end_frame"] += WINDOW_POST_EXTENSIONS.get(
+            candidate["id"], 0
+        )
     json.dump({"scenario": "Scenario 2: operation outside intersections", "selection_method": "Recorded forklift activity at least 180 px from the intersection", "windows": selected}, OUTPUT.open("w"), indent=2)
     lines = ["# Scenario 2 — candidate recorded time windows", "", "Each window is a 10-second recorded forklift segment whose focus track remains at least 180 px from the defined intersection at the centre frame.", "", "| ID | Source frames | Focus forklift behaviour | Prediction | Local traffic |", "|---|---|---|---|---|"]
     for item in selected:

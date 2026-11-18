@@ -152,6 +152,11 @@ Generated uncompressed replay files are written to:
 - `scenario_data/scenario_1_instances.json`
 - `scenario_data/scenario_2_instances.json`
 
+Scenario 2 generation validates that every route stays inside the robot
+operating area. It produces ten distinct route segments per recorded window
+and separates their initial AMR positions by at least 30 BEV pixels, so all
+variants are visually distinguishable in parallel playback.
+
 The committed `.json.gz` variants contain the selected replay artifacts for
 sharing. The reports describing intended instance coverage are in:
 

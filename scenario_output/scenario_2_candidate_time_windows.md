@@ -10,7 +10,7 @@ Each window is a 10-second recorded forklift segment whose focus track remains a
 | scenario_2_window_04 | 25402–25502 | track 92; 34.2 px/s (moving); 601.3 px from intersection | moving; route 0→1; uncertainty 0.20801817201967843 | 2 nearby |
 | scenario_2_window_05 | 70–170 | track 0; 161.8 px/s (moving); 629.1 px from intersection | moving; route 0→0; uncertainty 0.4622079468243001 | 1 nearby |
 | scenario_2_window_06 | 4217–4317 | track 1; 27.8 px/s (moving); 438.3 px from intersection | moving; route 2→0; uncertainty 0.5474668735391301 | 1 nearby |
-| scenario_2_window_07 | 8818–8918 | track 39; 71.5 px/s (moving); 342.2 px from intersection | moving; route 3→3; uncertainty 0.6001882781219229 | 1 nearby |
+| scenario_2_window_07 | 8818–8948 | track 39; 71.5 px/s (moving); 342.2 px from intersection | moving; route 3→3; uncertainty 0.6001882781219229 | 1 nearby |
 | scenario_2_window_08 | 29795–29895 | track 112; 64.1 px/s (moving); 664.9 px from intersection | moving; route 0→2; uncertainty 0.6405576265681217 | 1 nearby |
 | scenario_2_window_09 | 5555–5655 | track 16; 116.6 px/s (moving); 232.7 px from intersection | moving; route 3→1; uncertainty 0.0818660941092304 | 0 nearby |
 | scenario_2_window_10 | 7666–7766 | track 32; 50.9 px/s (moving); 222.9 px from intersection | moving; route 2→3; uncertainty 0.006280929732737639 | 0 nearby |
