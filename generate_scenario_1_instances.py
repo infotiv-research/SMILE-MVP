@@ -12,16 +12,18 @@ from pathlib import Path
 
 from shapely.geometry import LineString, Point, Polygon
 
+from scenario_config import path
+
 
 REPO_ROOT = Path(__file__).resolve().parent
-OUTPUT = REPO_ROOT / "scenario_data/scenario_1_instances.json"
-METRICS = REPO_ROOT / "scenario_output/scenario_1_supervisor_metrics.json"
-REPORT = REPO_ROOT / "scenario_output/scenario_1_supervisor_report.md"
-CLASSIFICATION_REPORT = REPO_ROOT / "scenario_output/scenario_1_instance_classification.md"
-WINDOW_SUMMARY_REPORT = REPO_ROOT / "scenario_output/scenario_1_window_behavior_summary.md"
-OPERATING_AREA_PATH = REPO_ROOT / "scenario_data/robot_operating_area.json"
-REFERENCE_PATHS_PATH = REPO_ROOT / "scenario_data/robot_reference_paths.json"
-CANDIDATE_WINDOWS_PATH = REPO_ROOT / "scenario_data/scenario_1_candidate_windows.json"
+OUTPUT = path("scenario_1_instances_json")
+METRICS = path("scenario_1_metrics")
+REPORT = path("scenario_1_report")
+CLASSIFICATION_REPORT = path("scenario_1_classification_report")
+WINDOW_SUMMARY_REPORT = path("scenario_1_window_summary")
+OPERATING_AREA_PATH = path("robot_operating_area")
+REFERENCE_PATHS_PATH = path("scenario_1_reference_paths")
+CANDIDATE_WINDOWS_PATH = path("scenario_1_candidate_windows")
 # At roughly 10 Hz, these add 1.5 s of normal operation before and after the
 # prior 60-frame clips, placing the interaction in the middle of a 90-frame run.
 WINDOW_BEFORE = 40
@@ -676,7 +678,7 @@ def normalise_window_frames(instances):
 
 
 def main():
-    area_data = json.load((REPO_ROOT / "scenario_data/intersection_area.json").open())
+    area_data = json.load(path("intersection_area").open())
     intersection_points = area_data["polygon_image_px"]
     intersection = Polygon(intersection_points)
     if not OPERATING_AREA_PATH.exists():
@@ -688,8 +690,8 @@ def main():
     reference_routes, rejected_reference_routes = load_reference_routes(
         operating_area, intersection
     )
-    frames = json.load((REPO_ROOT / "JSON-data/final.json").open())
-    prediction_frames = json.load((REPO_ROOT / "JSON-data/predictions_2026_02_27.json").open())
+    frames = json.load(path("recorded_tracks").open())
+    prediction_frames = json.load(path("predictions").open())
     predictions = {int(frame["time_stamp"]): frame.get("predictions", []) for frame in prediction_frames}
 
     candidates = json.load(CANDIDATE_WINDOWS_PATH.open()).get("windows", [])

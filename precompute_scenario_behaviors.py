@@ -15,6 +15,8 @@ import os
 from pathlib import Path
 import sys
 
+from scenario_config import path
+
 
 ROOT = Path(__file__).resolve().parent
 
@@ -170,11 +172,10 @@ def run_existing_viewer(mvp, app, instance):
 
 
 def artifacts(selected):
-    names = {"1": "scenario_1_instances", "2": "scenario_2_instances"}
     for key in selected:
-        base = ROOT / "scenario_data" / names[key]
-        plain = base.with_suffix(".json")
-        compressed = base.with_suffix(".json.gz")
+        compressed = path("scenario_{}_instances".format(key))
+        plain = compressed.with_suffix("") if compressed.suffix == ".gz" else compressed
+        plain = plain.with_suffix(".json")
         yield plain if plain.exists() else compressed, compressed
 
 

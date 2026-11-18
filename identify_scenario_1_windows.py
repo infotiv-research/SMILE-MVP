@@ -8,13 +8,15 @@ from pathlib import Path
 
 from shapely.geometry import Point, Polygon
 
+from scenario_config import path
+
 
 REPO_ROOT = Path(__file__).resolve().parent
-INTERSECTION_PATH = REPO_ROOT / "scenario_data/intersection_area.json"
-TRACKS_PATH = REPO_ROOT / "JSON-data/final.json"
-PREDICTIONS_PATH = REPO_ROOT / "JSON-data/predictions_2026_02_27.json"
-OUTPUT_JSON = REPO_ROOT / "scenario_data/scenario_1_candidate_windows.json"
-OUTPUT_REPORT = REPO_ROOT / "scenario_output/scenario_1_candidate_time_windows.md"
+INTERSECTION_PATH = path("intersection_area")
+TRACKS_PATH = path("recorded_tracks")
+PREDICTIONS_PATH = path("predictions")
+OUTPUT_JSON = path("scenario_1_candidate_windows")
+OUTPUT_REPORT = path("scenario_1_candidate_report")
 APPROACH_DISTANCE_PX = 160.0
 PRE_CONTEXT_FRAMES = 30
 POST_CONTEXT_FRAMES = 30

@@ -17,6 +17,16 @@ with the existing MVP supervisor, and replay them in a separate scenario UI.
 
 The default `python tuve_mvp_2026_04_16.py` viewer remains unchanged.
 
+Scenario replay locations are configured in the `scenario_paths` section of
+`mvp-config.json`. The replay viewer uses the normal `dataset_root` and
+configured mask folders for BEV images, so colleagues should adjust the config
+rather than edit Python paths for their local dataset layout.
+
+The extraction, instance-generation, and precompute scripts use the same
+`scenario_paths` section. In particular, set `recorded_tracks` and
+`predictions` to the local raw-recording files. The remaining entries control
+the scenario definitions, generated candidate/instance artifacts, and reports.
+
 ## Repository artifacts
 
 - `scenario_data/intersection_area.json` — user-defined intersection polygon.

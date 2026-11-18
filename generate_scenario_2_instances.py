@@ -7,15 +7,17 @@ from pathlib import Path
 
 from shapely.geometry import LineString, Point
 
+from scenario_config import path
+
 
 ROOT = Path(__file__).resolve().parent
-CANDIDATES = ROOT / "scenario_data/scenario_2_candidate_windows.json"
-REFERENCES = ROOT / "scenario_data/robot_reference_paths_scenario_2.json"
-TRACKS = ROOT / "JSON-data/final.json"
-PREDICTIONS = ROOT / "JSON-data/predictions_2026_02_27.json"
-INTERSECTION = ROOT / "scenario_data/intersection_area.json"
-OUTPUT = ROOT / "scenario_data/scenario_2_instances.json"
-REPORT = ROOT / "scenario_output/scenario_2_instance_classification.md"
+CANDIDATES = path("scenario_2_candidate_windows")
+REFERENCES = path("scenario_2_reference_paths")
+TRACKS = path("recorded_tracks")
+PREDICTIONS = path("predictions")
+INTERSECTION = path("intersection_area")
+OUTPUT = path("scenario_2_instances_json")
+REPORT = path("scenario_2_classification_report")
 RELEVANCE_DISTANCE_PX = 60.0
 
 

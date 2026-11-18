@@ -8,13 +8,15 @@ from pathlib import Path
 
 from shapely.geometry import Polygon
 
+from scenario_config import path
+
 
 ROOT = Path(__file__).resolve().parent
-TRACKS = ROOT / "JSON-data/final.json"
-PREDICTIONS = ROOT / "JSON-data/predictions_2026_02_27.json"
-INTERSECTION = ROOT / "scenario_data/intersection_area.json"
-OUTPUT = ROOT / "scenario_data/scenario_2_candidate_windows.json"
-REPORT = ROOT / "scenario_output/scenario_2_candidate_time_windows.md"
+TRACKS = path("recorded_tracks")
+PREDICTIONS = path("predictions")
+INTERSECTION = path("intersection_area")
+OUTPUT = path("scenario_2_candidate_windows")
+REPORT = path("scenario_2_candidate_report")
 WINDOW_HALF = 50  # five seconds at 10 Hz
 OUTSIDE_DISTANCE_PX = 180.0
 MIN_GLOBAL_SEPARATION = 300

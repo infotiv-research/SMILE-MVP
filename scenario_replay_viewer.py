@@ -6,6 +6,7 @@ ordinary MVP viewer and its layout remain unchanged.
 
 import gzip
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -23,10 +24,6 @@ from matplotlib.patches import Polygon as MplPolygon
 
 
 ROOT = Path(__file__).resolve().parent
-SCENARIO_FILES = {
-    "Scenario 1 — Intersection": ROOT / "scenario_data/scenario_1_instances.json.gz",
-    "Scenario 2 — Outside intersection": ROOT / "scenario_data/scenario_2_instances.json.gz",
-}
 COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
           "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
 
@@ -37,30 +34,59 @@ def read_json(path):
         return json.load(source)
 
 
-def load_polygon(name):
-    path = ROOT / "scenario_data" / name
+def resolve_path(value):
+    path = Path(value)
+    return path if path.is_absolute() else ROOT / path
+
+
+def load_config():
+    with (ROOT / "mvp-config.json").open() as source:
+        config = json.load(source)
+    required = ("scenario_1_instances", "scenario_2_instances",
+                "intersection_area", "robot_operating_area")
+    missing = [key for key in required if key not in config.get("scenario_paths", {})]
+    if missing:
+        raise KeyError("mvp-config.json scenario_paths is missing: {}".format(
+            ", ".join(missing)))
+    return config
+
+
+def scenario_files(config):
+    paths = config["scenario_paths"]
+    return {
+        "Scenario 1 — Intersection": resolve_path(paths["scenario_1_instances"]),
+        "Scenario 2 — Outside intersection": resolve_path(paths["scenario_2_instances"]),
+    }
+
+
+def load_polygon(path):
     if not path.exists():
         return []
     return read_json(path).get("polygon_image_px", [])
 
 
-def find_bev_images():
-    """Find local BEV imagery without requiring the normal viewer config."""
-    candidates = [
-        ROOT / "Data/bev_img/bev_img",
-        ROOT / "Data/bev_res",
-        ROOT / "Data/confidential_tuve_dataset/bev_res",
-        ROOT / "Data/confidential_tuve_dataset/bev_img/bev_img",
-    ]
+def configured_bev_folders(config):
+    """Return BEV directories from the normal MVP dataset configuration."""
+    paths = config["paths"]
+    dataset_root = resolve_path(paths["dataset_root"])
+    folders = [dataset_root / paths["mask_folder"]]
+    extra_mask = config.get("extra_paths", {}).get("mask_folder")
+    if extra_mask:
+        folders.append(dataset_root / extra_mask)
+    return folders
+
+
+def find_bev_images(config):
+    """Index numeric and camera-prefixed BEV image filenames by timestamp."""
     images = {}
-    for folder in candidates:
+    for folder in configured_bev_folders(config):
         if not folder.is_dir():
             continue
         for image in folder.glob("*.jpg"):
-            try:
-                images.setdefault(int(image.stem), image)
-            except ValueError:
+            match = re.search(r"(\d+)$", image.stem)
+            if match is None:
                 continue
+            images.setdefault(int(match.group(1)), image)
         if images:
             break
     return images
@@ -158,12 +184,18 @@ class ScenarioReplayWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("TUVE MVP — Scenario Replay")
         self.resize(1450, 900)
-        self.intersection = load_polygon("intersection_area.json")
-        self.operating_area = load_polygon("robot_operating_area.json")
-        self.canvas = ReplayCanvas(self.intersection, self.operating_area, find_bev_images())
-        self.payloads = {label: read_json(path) for label, path in SCENARIO_FILES.items() if path.exists()}
+        self.config = load_config()
+        scenario_paths = self.config["scenario_paths"]
+        self.intersection = load_polygon(resolve_path(scenario_paths["intersection_area"]))
+        self.operating_area = load_polygon(resolve_path(scenario_paths["robot_operating_area"]))
+        self.canvas = ReplayCanvas(self.intersection, self.operating_area,
+                                   find_bev_images(self.config))
+        self.payloads = {label: read_json(path) for label, path in scenario_files(self.config).items()
+                         if path.exists()}
         if not self.payloads:
-            raise FileNotFoundError("No scenario replay artifacts found in scenario_data/")
+            raise FileNotFoundError(
+                "No scenario replay artifacts found at paths configured in mvp-config.json"
+            )
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self.advance)

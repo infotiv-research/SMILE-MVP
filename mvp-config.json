@@ -10,12 +10,15 @@
     "save_path": "../JSON-data/trajectories_2026_02_27.json"
   },
   "runtime": {
-    "window_range": [0, 33000],
+    "window_range": [
+      0,
+      33000
+    ],
     "horizon": 10,
     "base_speed": 10.0,
     "vehicle_radius": 20.0,
     "max_distance": 150.0,
-	"track_stride": 3,
+    "track_stride": 3,
     "min_cosine_deg": 60
   },
   "ui": {
@@ -34,6 +37,29 @@
     "predictions": "../JSON-data/predictions_2026_02_27.json",
     "occupancy_projection": "occupancy_projection.pkl",
     "robot_paths": "../JSON-data/robot_paths.json",
-	"model_path": "./Models/model_20261110_164647.npz"	
+    "model_path": "./Models/model_20261110_164647.npz"
+  },
+  "scenario_paths": {
+    "data_dir": "scenario_data",
+    "output_dir": "scenario_output",
+    "recorded_tracks": "JSON-data/final.json",
+    "predictions": "JSON-data/predictions_2026_02_27.json",
+    "scenario_1_instances": "scenario_data/scenario_1_instances.json.gz",
+    "scenario_2_instances": "scenario_data/scenario_2_instances.json.gz",
+    "intersection_area": "scenario_data/intersection_area.json",
+    "robot_operating_area": "scenario_data/robot_operating_area.json",
+    "scenario_1_reference_paths": "scenario_data/robot_reference_paths.json",
+    "scenario_2_reference_paths": "scenario_data/robot_reference_paths_scenario_2.json",
+    "scenario_1_candidate_windows": "scenario_data/scenario_1_candidate_windows.json",
+    "scenario_2_candidate_windows": "scenario_data/scenario_2_candidate_windows.json",
+    "scenario_1_candidate_report": "scenario_output/scenario_1_candidate_time_windows.md",
+    "scenario_2_candidate_report": "scenario_output/scenario_2_candidate_time_windows.md",
+    "scenario_1_instances_json": "scenario_data/scenario_1_instances.json",
+    "scenario_2_instances_json": "scenario_data/scenario_2_instances.json",
+    "scenario_1_metrics": "scenario_output/scenario_1_supervisor_metrics.json",
+    "scenario_1_report": "scenario_output/scenario_1_supervisor_report.md",
+    "scenario_1_classification_report": "scenario_output/scenario_1_instance_classification.md",
+    "scenario_1_window_summary": "scenario_output/scenario_1_window_behavior_summary.md",
+    "scenario_2_classification_report": "scenario_output/scenario_2_instance_classification.md"
   }
 }
