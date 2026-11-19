@@ -119,14 +119,34 @@ class ExistingMvpReplay:
         self.start()
 
     def start(self):
-        self.path_name = install_instance(self.mvp, self.instance)
+        self.path_name = install_instance(
+            self.mvp,
+            self.instance
+        )
+
         self.viewer = self.mvp.MVPViewer()
-        self.viewer.current_path_name = self.path_name
-        self.viewer.active_track_id = None
+
+        self.viewer.current_path_name = (
+            self.path_name
+        )
+
+        focus_track = self.instance.get(
+            "focus_track_id"
+        )
+
+        self.viewer.active_track_id = (
+            int(focus_track)
+            if focus_track is not None
+            else None
+        )
+
         self.viewer.snap_agent_to_active_path()
+
         self.cursor = 0
         self.completed = False
-        self.positions, self.actions = [], []
+
+        self.positions = []
+        self.actions = []
 
     def reset(self):
         self.viewer.deleteLater()
@@ -150,25 +170,158 @@ class ExistingMvpReplay:
                 self.completed = self.viewer.current_waypoint_idx >= len(
                     self.mvp.DEFAULT_PATHS[self.path_name].waypoints)
                 action = "GOAL_REACHED" if self.completed else self.viewer.decision_action
-            self.positions.append([float(self.viewer.agent_x), float(self.viewer.agent_y)])
-            self.actions.append(action)
+            self.positions.append(
+                [
+                    float(self.viewer.agent_x),
+                    float(self.viewer.agent_y)
+                ]
+            )
+
+            snapshot = self.viewer.runtime_snapshot()
+
+            snapshot["action"] = action
+
+            self.actions.append(snapshot)
             self.cursor += 1
-        return self.positions[-1], self.actions[-1]
+        return (self.positions[-1], self.actions[-1])
 
 
 def run_existing_viewer(mvp, app, instance):
-    """Run the unmodified MVP decision and motion loop on one instance."""
-    replay = ExistingMvpReplay(mvp, app, instance)
+    """
+    Run the unmodified MVP decision and motion loop on one instance.
+    Produces per-frame diagnostics and aggregate evaluation metrics.
+    """
+
+    replay = ExistingMvpReplay(
+        mvp,
+        app,
+        instance
+    )
+
     diagnostics = []
+
+    min_ttc = float("inf")
+    min_trust = 1.0
+    max_risk = 0.0
+
+    collision = False
+    near_miss = False
+    failed_test = False
+
+    final_action = "UNKNOWN"
+    trigger_action = None
+    trigger_ttc = None
+    trigger_trust = None
+    trigger_frame = None
     for index in range(len(mvp.tracks)):
+
         replay.advance_to(index)
-        diagnostics.append({"frame": index, "minimum_ttc_s": float(replay.viewer.minimum_ttc),
-                            "runtime_state": replay.viewer.runtime_state,
-                            "decision_action": replay.viewer.decision_action})
-    positions, actions = replay.positions, replay.actions
+
+        snapshot = replay.actions[-1]
+        if (
+            trigger_action is None
+            and snapshot.get("action") in ("YIELD","AVOID_LEFT","WAIT_BEFORE_INTERSECTION")
+        ):
+            trigger_action = snapshot.get(
+                "action"
+            )
+
+            trigger_ttc = snapshot.get(
+                "ttc"
+            )
+
+            trigger_trust = snapshot.get(
+                "trust"
+            )
+
+            trigger_frame = index
+        ttc = snapshot.get("ttc")
+        trust = snapshot.get("trust", 1.0)
+        risk = snapshot.get("risk", 0.0)
+
+        if ttc is not None:
+            min_ttc = min(
+                min_ttc,
+                float(ttc)
+            )
+
+        min_trust = min(
+            min_trust,
+            float(trust)
+        )
+
+        max_risk = max(
+            max_risk,
+            float(risk)
+        )
+
+        collision |= bool(
+            snapshot.get("collision")
+        )
+
+        near_miss |= bool(
+            snapshot.get("near_miss")
+        )
+
+        failed_test |= bool(
+            snapshot.get("failed_test")
+        )
+
+        final_action = snapshot.get(
+            "action",
+            final_action
+        )
+
+        diagnostics.append(
+            {
+                "frame": index,
+                "minimum_ttc_s": ttc,
+                "runtime_state": snapshot.get(
+                    "runtime_state"
+                ),
+                "decision_action": snapshot.get(
+                    "action"
+                ),
+                "trust": trust,
+                "risk": risk,
+            }
+        )
+
+    summary = {
+        "max_risk": float(max_risk),
+        "min_trust": float(min_trust),
+        "min_ttc": (
+            None
+            if min_ttc == float("inf")
+            else float(min_ttc)
+        ),
+        "collision": collision,
+        "near_miss": near_miss,
+        "failed_test": failed_test,
+        "final_action": final_action,
+        "trigger_action": trigger_action,
+        "trigger_ttc": trigger_ttc,
+        "trigger_trust": trigger_trust,
+        "trigger_frame": trigger_frame,
+        "result": (
+            "FAIL"
+            if failed_test
+            else "PASS"
+        ),
+    }
+
+    positions = replay.positions
+    actions = replay.actions
+
     replay.viewer.deleteLater()
     app.processEvents()
-    return positions, actions, diagnostics
+
+    return (
+        positions,
+        actions,
+        diagnostics,
+        summary,
+    )
 
 
 def artifacts(selected):
@@ -178,6 +331,30 @@ def artifacts(selected):
         plain = plain.with_suffix(".json")
         yield plain if plain.exists() else compressed, compressed
 
+def write_summary_csv(
+    path,
+    rows,
+):
+    import csv
+
+    path.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    with open(
+        path,
+        "w",
+        newline=""
+    ) as f:
+
+        writer = csv.DictWriter(
+            f,
+            fieldnames=rows[0].keys()
+        )
+
+        writer.writeheader()
+        writer.writerows(rows)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -187,24 +364,68 @@ def main():
 
     mvp = load_existing_mvp()
     app = mvp.QApplication.instance() or mvp.QApplication([])
+    summary_rows = []
     for source, default_destination in artifacts(args.scenario or ["1", "2"]):
         payload = read_json(source)
         instances = payload.get("instances", [])
         normalise_window_frames(instances)
         for instance in instances:
-            positions, actions, diagnostics = run_existing_viewer(mvp, app, instance)
+            (
+                positions,
+                actions,
+                diagnostics,
+                summary,
+            ) = run_existing_viewer(
+                mvp,
+                app,
+                instance
+            )
+
             instance["precomputed_behavior"] = {
                 "positions": positions,
                 "actions": actions,
                 "diagnostics": diagnostics,
-                "method": "existing tuve_mvp_2026_04_16.MVPViewer supervisor and motion loop",
-                "frame_count": len(instance["frames"]),
-                "terminal_action": "GOAL_REACHED",
+                "summary": summary,
+                "method": (
+                    "existing "
+                    "tuve_mvp_2026_04_16.MVPViewer "
+                    "supervisor and motion loop"
+                ),
+                "frame_count": len(
+                    instance["frames"]
+                ),
+                "terminal_action": (
+                    summary["final_action"]
+                ),
             }
+            summary_rows.append({
+                "instance_id": instance["id"],
+                "window_id": instance.get("window_id"),
+                "focus_track_id": instance.get(
+                    "focus_track_id"
+                ),
+                "path_label": instance.get(
+                    "robot_path_label",
+                    ""
+                ),
+                **summary,
+            })            
         destination = args.output_dir / default_destination.name if args.output_dir else default_destination
         write_json(destination, payload)
         print("Wrote {} from the existing MVP supervisor ({} instances)".format(destination, len(instances)))
+    if summary_rows:
 
+        csv_path = (
+            (args.output_dir or ROOT)
+            / "scenario_summary.csv"
+        )
+
+        write_summary_csv(
+            csv_path,
+            summary_rows
+        )
+
+        print(f"Wrote {csv_path}")
 
 if __name__ == "__main__":
     main()

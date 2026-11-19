@@ -595,121 +595,7 @@ for tid, samples in TRACK_BBOX_STATS.items():
             np.cov(arr.T)
     }
 
-def estimate_bbox_uncertainty(
-    track_id
-):
 
-    model = (
-        TRACK_BBOX_MODEL.get(
-            track_id
-        )
-    )
-
-    if model is None:
-        return 0.0
-
-    eigvals = np.linalg.eigvalsh(
-        model["cov"]
-    )
-
-    raw = np.sqrt(
-        eigvals.max()
-    )
-
-    return float(
-        np.clip(
-            raw / 2.0,
-            0.0,
-            1.0
-        )
-    )
-
-def estimate_trajectory_uncertainty(
-    track_id
-):
-
-    hist = TRACK_HISTORY.get(
-        track_id,
-        []
-    )
-
-    if len(hist) < 6:
-        return 0.0
-
-    pts = np.asarray([
-
-        (h[1], h[2])
-
-        for h in hist[-10:]
-    ])
-
-    vel = np.diff(
-        pts,
-        axis=0
-    )
-
-    if len(vel) < 2:
-        return 0.0
-
-    headings = np.arctan2(
-        vel[:,1],
-        vel[:,0]
-    )
-
-    return float(
-
-        np.clip(
-            np.std(headings)
-            /
-            np.pi,
-            0.0,
-            1.0
-        )
-    )
-
-def route_prediction_uncertainty(
-    route_info
-):
-
-    if route_info is None:
-        return 1.0
-
-    p = route_info.get(
-        "prob"
-    )
-
-    if p is None:
-        return 1.0
-
-    return float(
-        np.clip(
-            1.0-float(p),
-            0.0,
-            1.0
-        )
-    )
-
-def maneuver_uncertainty(
-    mode_info
-):
-
-    if mode_info is None:
-        return 1.0
-
-    conf = mode_info.get(
-        "display_confidence"
-    )
-
-    if conf is None:
-        return 1.0
-
-    return float(
-        np.clip(
-            1.0-float(conf),
-            0.0,
-            1.0
-        )
-    )
 
 @dataclass
 class ScenarioResult:
@@ -1361,7 +1247,7 @@ def remove_duplicate_waypoints(waypoints, eps=1e-6):
             cleaned.append(tuple(pt))
 
     return cleaned
-    
+
 def load_paths():
     if not os.path.exists(PATH_DB):
         return
@@ -1879,13 +1765,10 @@ class MVPViewer(FigureCanvasQTAgg):
         return self.prediction_trust
 
     def evaluate_scene_risk(self, frame):
-
         self.minimum_ttc = min(
             (
                 self.compute_ttc(o)
                 for o in frame["objects"]
-                if self.active_track_id is None
-                or o["track_id"] == self.active_track_id
             ),
             default=np.inf
         )
@@ -1901,7 +1784,9 @@ class MVPViewer(FigureCanvasQTAgg):
             extra={
                 "alert_ood": self.alert_ood,
                 "viewer": self,
-                "intersection_poly": INTERSECTION_POLY
+                "intersection_poly": INTERSECTION_POLY,
+                "track_history": TRACK_HISTORY,
+                "track_bbox_model": TRACK_BBOX_MODEL,
             }
         )
 
@@ -1931,9 +1816,20 @@ class MVPViewer(FigureCanvasQTAgg):
             "camera_ood"
         )
 
-        track = trust_results.get(
-            "track_uncertainty"
+        trust = self.decision_engine.compute_trust(
+            self.supervisor_results
         )
+
+        self.current_trust = trust
+
+        if trust < 0.25:
+            self.runtime_state = "UNSAFE"
+        elif trust < 0.50:
+            self.runtime_state = "WARNING"
+        elif trust < 0.70:
+            self.runtime_state = "DEGRADED"
+        else:
+            self.runtime_state = "NORMAL"
 
         traj = scenario_results.get(
             "trajectory_conflict"
@@ -1943,109 +1839,104 @@ class MVPViewer(FigureCanvasQTAgg):
             "intersection_occupancy"
         )
 
-        ood_score = getattr(ood, "score", 0.0)
-        track_score = getattr(track, "score", 0.0)
-
-        self.current_trust = np.clip(
-            1.0
-            - 0.35 * ood_score
-            - 0.25 * track_score
-            - (0.30 if getattr(ood, "flag", False) else 0),
-            0.0,
-            1.0
+        conflict_risk = (
+            traj.score
+            if traj else 0.0
         )
 
-        if self.current_trust < 0.25:
-            self.runtime_state = "UNSAFE"
-        elif self.current_trust < 0.50:
-            self.runtime_state = "WARNING"
-        elif self.current_trust < 0.80:
-            self.runtime_state = "DEGRADED"
-        else:
-            self.runtime_state = "NORMAL"
-
-        conflict_risk = getattr(traj, "score", 0.0)
-        intersection_risk = getattr(
-            intersection,
-            "score",
-            0.0
+        intersection_risk = (
+            intersection.score
+            if intersection else 0.0
         )
+
         self.intersection_risk = (
             intersection_risk
         )
-        avoid_side = (
-            traj.details.get(
-                "avoid_side",
-                "LEFT"
-            )
-            if traj else "LEFT"
+
+        conflict_count = sum(
+            1
+            for obj in frame["objects"]
+            if self.compute_ttc(obj) < 4.0
         )
 
-        self.update_avoidance_state(
-            conflict_risk,
-            avoid_side
+        if trust < 0.25:
+
+            yield_threshold = 0.30
+            avoid_threshold = 0.55
+
+        elif trust < 0.50:
+
+            yield_threshold = 0.40
+            avoid_threshold = 0.65
+
+        else:
+
+            yield_threshold = 0.50
+            avoid_threshold = 0.75
+
+
+        force_degraded = (
+            self.runtime_state == "UNSAFE"
         )
 
-        trust_issue = (
-            self.runtime_state != "NORMAL"
-        )
+        if force_degraded:
 
-        self.agent_speed_factor = (
-            0.5 * self.operator_speed_factor
-            if trust_issue
-            else self.operator_speed_factor
-        )
-
-        if trust_issue:
-            self.decision_action = "DEGRADED_MODE"
-
-        elif intersection_risk > 0.5:
             self.decision_action = (
-                "WAIT_BEFORE_INTERSECTION"
+                "DEGRADED_MODE"
             )
 
-        elif conflict_risk > 0.75:
-            self.decision_action = (
-                f"AVOID_{avoid_side}"
-            )
+        elif conflict_count >= 2:
 
-        elif conflict_risk > 0.60:
+            self.decision_action = "YIELD"
+
+        elif conflict_risk >= avoid_threshold:
+
+            self.decision_action = "AVOID_LEFT"
+
+        elif (
+            conflict_risk >= yield_threshold
+            or
+            intersection_risk >= yield_threshold
+        ):
+
             self.decision_action = "YIELD"
 
         else:
+
             self.decision_action = "PROCEED"
 
         self.warning_level = (
             "EMERGENCY"
             if conflict_risk > 0.90
-            else "URGENT"
-            if conflict_risk > 0.75
             else "WARNING"
             if conflict_risk > 0.50
             else "NONE"
         )
 
         self.forklift_alert = (
-            conflict_risk > 0.50
+            self.decision_action
+            != "PROCEED"
         )
 
-        self.scenario_type = (
-            "TRUST_DEGRADATION"
-            if trust_issue
-            else "INTERSECTION_BLOCKAGE"
-            if intersection_risk > 0.40
-            else "COLLISION_AVOIDANCE"
-            if conflict_risk > 0.50
-            else "NONE"
-        )
-
-        self.scenario_risk = (
-            1.0 - self.current_trust
-            if trust_issue
-            else max(
-                conflict_risk,
-                intersection_risk
+        if conflict_risk > 0:
+            self.scenario_type = (
+                "COLLISION_AVOIDANCE"
             )
+        elif intersection_risk > 0:
+            self.scenario_type = (
+                "INTERSECTION_BLOCKAGE"
+            )
+        elif self.runtime_state == "UNSAFE":
+            self.scenario_type = (
+                "TRUST_DEGRADATION"
+            )
+        else:
+            self.scenario_type = "NONE"
+
+        self.scenario_risk = max(
+            conflict_risk,
+            intersection_risk,
+            1.0 - trust
         )
 
         self.near_miss = (
@@ -2053,13 +1944,84 @@ class MVPViewer(FigureCanvasQTAgg):
             and not self.alert_collision
         )
 
+        intervention = (
+            self.decision_action
+            != "PROCEED"
+        )
+
         self.failed_test = (
             self.alert_collision
             or (
                 self.minimum_ttc < 2.0
-                and self.decision_action == "PROCEED"
+                and not intervention
             )
         )
+
+    def runtime_snapshot(self):
+
+        route = self.route_info or {}
+        mode = self.mode_info or {}
+
+        mode_name = mode.get("mode")
+        mode_probs = mode.get(
+            "mode_probs",
+            {}
+        )
+
+        maneuver_conf = (
+            mode_probs.get(mode_name)
+            if mode_name is not None
+            else None
+        )
+
+        return {
+            "action": self.decision_action,
+            "scenario": getattr(
+                self,
+                "scenario_type",
+                "NONE"
+            ),
+            "risk": float(
+                getattr(
+                    self,
+                    "scenario_risk",
+                    0.0
+                )
+            ),
+            "runtime_state": self.runtime_state,
+            "trust": float(
+                self.current_trust
+            ),
+            "ttc": (
+                float(self.minimum_ttc)
+                if np.isfinite(
+                    self.minimum_ttc
+                )
+                else None
+            ),
+            "collision": bool(
+                self.alert_collision
+            ),
+            "near_miss": bool(
+                self.near_miss
+            ),
+            "failed_test": bool(
+                self.failed_test
+            ),
+            "route_prob": route.get(
+                "prob"
+            ),
+            "route_uncertainty": route.get(
+                "uncertainty"
+            ),
+            "maneuver": mode_name,
+            "maneuver_confidence": (
+                float(maneuver_conf)
+                if maneuver_conf is not None
+                else None
+            ),
+        }
+
 
     def compute_ttc(self, obj):
 
@@ -2781,27 +2743,18 @@ class MVPViewer(FigureCanvasQTAgg):
             self.get_relevant_cameras()
         )
 
-        #
-        # display only
-        #
-
         self.alert_cam = None
 
         if self.relevant_cameras:
-
             self.alert_cam = ",".join(
                 self.relevant_cameras
             )
-
-        #
-        # worst OOD across relevant cameras
-        #
 
         ts = int(
             self.current_timestamp
         )
 
-        worst_score = -1
+        worst_score = -1.0
 
         OOD_MATCH_WINDOW_MS = 1000
 
@@ -2812,22 +2765,14 @@ class MVPViewer(FigureCanvasQTAgg):
             if len(keys) == 0:
                 continue
 
-            delta = np.abs(
-                keys - ts
-            )
+            delta = np.abs(keys - ts)
 
             idx = delta.argmin()
-
-            #
-            # reject stale match
-            #
 
             if delta[idx] > OOD_MATCH_WINDOW_MS:
                 continue
 
-            nearest_key = int(
-                keys[idx]
-            )
+            nearest_key = int(keys[idx])
 
             result = scores.get(
                 nearest_key
@@ -2839,27 +2784,12 @@ class MVPViewer(FigureCanvasQTAgg):
             score = float(result[0])
 
             if score > worst_score:
-
                 worst_score = score
-
                 self.alert_ood = result
-
-        #
-        # collision
-        #
-
-        objects = frame["objects"]
-
-        if self.active_track_id is not None:
-            objects = [
-                o for o in objects
-                if o["track_id"]
-                == self.active_track_id
-            ]
 
         self.alert_collision = False
 
-        for obj in objects:
+        for obj in frame["objects"]:
 
             cx, cy = get_occ_center(obj)
 
@@ -2871,6 +2801,7 @@ class MVPViewer(FigureCanvasQTAgg):
             if d < 30:
                 self.alert_collision = True
                 break
+
 
     def lookup_predictions(self):
         key = (
@@ -2915,6 +2846,10 @@ class MVPViewer(FigureCanvasQTAgg):
                 )        
 
         if pred is None:
+            print(
+                f"[NO_PRED] ts={self.current_timestamp} "
+                f"track={self.active_track_id}"
+            )
             return
 
         self.route_info = pred.get(
@@ -3878,9 +3813,9 @@ class MainWindow(QMainWindow):
             f"{mode.get('mode','N/A')}"
         )
 
-        conf = mode.get(
-            "display_confidence"
-        )
+        mode_name = mode.get("mode")
+        mode_probs = mode.get("mode_probs", {})
+        conf = mode_probs.get(mode_name)
 
         self.set_label(
             self.label_mode_prob,

@@ -7,6 +7,121 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
+import numpy as np
+
+
+
+def route_prediction_uncertainty(
+    route_info
+):
+
+    if route_info is None:
+        return 1.0
+
+    p = route_info.get(
+        "prob"
+    )
+
+    if p is None:
+        return 1.0
+
+    return float(
+        np.clip(
+            1.0-float(p),
+            0.0,
+            1.0
+        )
+    )
+
+def maneuver_uncertainty(mode_info):
+    if not mode_info:
+        return 1.0
+
+    mode = mode_info.get("mode")
+    probabilities = mode_info.get("mode_probs", {})
+
+    if mode is None or mode not in probabilities:
+        return 1.0
+
+    confidence = float(probabilities[mode])
+
+    return float(np.clip(
+        1.0 - confidence,
+        0.0,
+        1.0,
+    ))
+
+def estimate_bbox_uncertainty(
+    track_id,
+    bbox_model
+):
+    model = bbox_model.get(
+        track_id
+    )
+
+    if model is None:
+        return 0.0
+
+    eigvals = np.linalg.eigvalsh(
+        model["cov"]
+    )
+
+    raw = np.sqrt(
+        max(
+            0.0,
+            eigvals.max()
+        )
+    )
+
+    score = raw / 10.0
+
+    return float(
+        np.clip(
+            score,
+            0.0,
+            1.0
+        )
+    )
+
+def estimate_trajectory_uncertainty(
+    track_id,
+    track_history
+):
+    hist = track_history.get(
+        track_id,
+        []
+    )
+
+    if len(hist) < 6:
+        return 0.0
+
+    pts = np.asarray([
+        (h[1], h[2])
+        for h in hist[-10:]
+    ])
+
+    vel = np.diff(
+        pts,
+        axis=0
+    )
+
+    if len(vel) < 2:
+        return 0.0
+
+    headings = np.arctan2(
+        vel[:,1],
+        vel[:,0]
+    )
+
+    return float(
+        np.clip(
+            np.std(headings)
+            / np.pi,
+            0.0,
+            1.0
+        )
+    )
+
 
 
 # ==========================================================
@@ -142,18 +257,17 @@ class SupervisorManager:
 
             except Exception as e:
 
+                print(
+                    f"[SUPERVISOR ERROR] "
+                    f"{supervisor.name}: {e}"
+                )
+
                 result = SupervisorResult(
-
                     name=supervisor.name,
-
                     category="error",
-
                     score=1.0,
-
                     confidence=0.0,
-
                     flag=True,
-
                     details={
                         "exception": str(e)
                     }
@@ -243,28 +357,26 @@ class BBoxUncertaintySupervisor(
             scene.active_track_id
             is None
         ):
-
             score = 0.0
 
         else:
 
-            score = estimate_bbox_uncertainty(
-                scene.active_track_id
+            score = (
+                estimate_bbox_uncertainty(
+                    scene.active_track_id,
+                    scene.extra.get(
+                        "track_bbox_model",
+                        {}
+                    ),
+                )
             )
 
         return SupervisorResult(
-
             name=self.name,
-
             category=self.category,
-
             score=score,
-
             confidence=1.0 - score,
-
-            flag=(
-                score > 0.7
-            )
+            flag=(score > 0.7)
         )
 
 class TrajectoryUncertaintySupervisor(
@@ -284,30 +396,26 @@ class TrajectoryUncertaintySupervisor(
             scene.active_track_id
             is None
         ):
-
             score = 0.0
 
         else:
 
             score = (
                 estimate_trajectory_uncertainty(
-                    scene.active_track_id
+                    scene.active_track_id,
+                    scene.extra.get(
+                        "track_history",
+                        {}
+                    ),
                 )
             )
 
         return SupervisorResult(
-
             name=self.name,
-
             category=self.category,
-
             score=score,
-
             confidence=1.0 - score,
-
-            flag=(
-                score > 0.7
-            )
+            flag=(score > 0.7)
         )
 
 class RouteUncertaintySupervisor(

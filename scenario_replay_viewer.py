@@ -8,7 +8,6 @@ import gzip
 import json
 import re
 import sys
-from collections import Counter
 from pathlib import Path
 
 import cv2
@@ -21,6 +20,7 @@ from PyQt6.QtWidgets import (
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Polygon as MplPolygon
+
 
 
 ROOT = Path(__file__).resolve().parent
@@ -128,12 +128,24 @@ class ReplayCanvas(FigureCanvasQTAgg):
         )
         return path[-1] if path else [0.0, 0.0]
 
+
     @staticmethod
-    def cached_action(instance, index):
-        if "_live_action" in instance:
-            return instance["_live_action"]
-        actions = instance.get("precomputed_behavior", {}).get("actions", [])
-        return actions[min(index, len(actions) - 1)] if actions else "N/A"
+    def cached_result(instance, index):
+        if "_live_result" in instance:
+            return instance["_live_result"]
+
+        results = (
+            instance
+            .get("precomputed_behavior", {})
+            .get("actions", [])
+        )
+
+        return (
+            results[min(index, len(results) - 1)]
+            if results
+            else {}
+        )
+
 
     def render_replay(self, instances, index):
         self.ax.clear()
@@ -315,36 +327,110 @@ class ScenarioReplayWindow(QMainWindow):
         self.render()
 
     def render(self):
+
         instances = self.selected_instances()
+
         if not self.use_precomputed:
-            self.render_live_behavior(instances)
-        self.canvas.render_replay(instances, self.frame_index)
-        actions = Counter(ReplayCanvas.cached_action(item, self.frame_index) for item in instances)
-        first = instances[0]
-        self.frame_label.setText("Frame {} / {}".format(self.frame_index, self.slider.maximum()))
-        self.info_label.setText(
-            "Focus forklift: {}\nExpected coverage: {}\nActions: {}\n\n{} behavior; robots do not interact with each other.".format(
-                first.get("focus_track_id", "?"), first.get("coverage", "recorded replay"),
-                ", ".join("{}={}".format(key, value) for key, value in sorted(actions.items())),
-                "Precomputed" if self.use_precomputed else "Live existing-MVP",
+            self.render_live_behavior(
+                instances
             )
+
+        self.canvas.render_replay(
+            instances,
+            self.frame_index
         )
 
+        active_instance = instances[0]
+
+        current = ReplayCanvas.cached_result(
+            active_instance,
+            self.frame_index
+        )
+
+        summary = (
+            active_instance
+            .get("precomputed_behavior", {})
+            .get("summary", {})
+        )
+
+        self.frame_label.setText(
+            f"Frame {self.frame_index} / {self.slider.maximum()}"
+        )
+
+        self.info_label.setText(
+            "\n".join([
+                f"Focus forklift: {active_instance.get('focus_track_id', '?')}",
+                f"Path: {active_instance.get('robot_path_label', '-')}",
+                "",
+
+                f"Current action: {current.get('action', '-')}",
+                f"Current state: {current.get('runtime_state', '-')}",
+                f"Current scenario: {current.get('scenario', '-')}",
+                f"Current trust: {current.get('trust', '-')}",
+                f"Current TTC: {current.get('ttc', '-')}",
+                f"Current risk: {current.get('risk', 0.0):.2f}",
+
+                "",
+                "Scenario summary",
+
+                f"Result: {summary.get('result', '-')}",
+                f"Trigger action: {summary.get('trigger_action', '-')}",
+                f"Trigger TTC: {summary.get('trigger_ttc', '-')}",
+                f"Trigger trust: {summary.get('trigger_trust', '-')}",
+                f"Trigger frame: {summary.get('trigger_frame', '-')}",
+
+                f"Collision: {summary.get('collision', False)}",
+                f"Near miss: {summary.get('near_miss', False)}",
+                f"Failed test: {summary.get('failed_test', False)}",
+
+                "",
+                (
+                    "Precomputed MVP behavior"
+                    if self.use_precomputed
+                    else "Live MVP behavior"
+                ),
+            ])
+        )
+
+
     def render_live_behavior(self, instances):
+
         if self.live_mvp is None:
-            from precompute_scenario_behaviors import ExistingMvpReplay, load_existing_mvp
+
+            from precompute_scenario_behaviors import (
+                ExistingMvpReplay,
+                load_existing_mvp,
+            )
+
             self.live_mvp = load_existing_mvp()
             self.live_app = QApplication.instance()
             self._live_replay_type = ExistingMvpReplay
+
         for instance in instances:
+
             key = instance["id"]
+
             replay = self.live_replays.get(key)
+
             if replay is None:
-                replay = self._live_replay_type(self.live_mvp, self.live_app, instance)
+
+                replay = self._live_replay_type(
+                    self.live_mvp,
+                    self.live_app,
+                    instance,
+                )
+
                 self.live_replays[key] = replay
-            position, action = replay.advance_to(self.frame_index)
+            cached = instance.get("_live_frame")
+            if cached == self.frame_index:
+                continue
+            position, result = replay.advance_to(
+                self.frame_index
+            )
+            instance["_live_frame"] = self.frame_index
             instance["_live_position"] = position
-            instance["_live_action"] = action
+            instance["_live_result"] = result
+
 
     def seek(self, value):
         self.frame_index = value; self.render()
