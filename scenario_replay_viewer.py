@@ -327,70 +327,35 @@ class ScenarioReplayWindow(QMainWindow):
         self.render()
 
     def render(self):
-
-        instances = self.selected_instances()
-
+        instances=self.selected_instances()
         if not self.use_precomputed:
-            self.render_live_behavior(
-                instances
-            )
+            self.render_live_behavior(instances)
+        self.canvas.render_replay(instances,self.frame_index)
 
-        self.canvas.render_replay(
-            instances,
-            self.frame_index
-        )
+        active=instances[0]
+        current=ReplayCanvas.cached_result(active,self.frame_index)
+        summary=active.get('precomputed_behavior',{}).get('summary',{})
+        trigger=summary.get('trigger') or {}
 
-        active_instance = instances[0]
+        self.frame_label.setText(f'Frame {self.frame_index} / {self.slider.maximum()}')
 
-        current = ReplayCanvas.cached_result(
-            active_instance,
-            self.frame_index
-        )
+        self.info_label.setText('\n'.join([
+            f"Focus forklift: {active.get('focus_track_id','?')}",
+            f"Path: {active.get('robot_path_label','-')}",
+            '',
+            f"Action: {current.get('action','-')}",
+            f"State: {current.get('runtime_state','-')}",
+            f"Scenario: {current.get('scenario','-')}",
+            f"Trust: {current.get('trust','-')}",
+            f"TTC: {current.get('ttc','-')}",
+            f"Risk: {current.get('risk',0.0):.2f}",
+            f"Route prob: {current.get('route_prob','-')}",
+            f"Route unc: {current.get('route_uncertainty','-')}",
+            f"Maneuver: {current.get('maneuver','-')}",
+            f"Maneuver conf: {current.get('maneuver_confidence','-')}",
+            'Precomputed MVP behavior' if self.use_precomputed else 'Live MVP behavior'
+        ]))
 
-        summary = (
-            active_instance
-            .get("precomputed_behavior", {})
-            .get("summary", {})
-        )
-
-        self.frame_label.setText(
-            f"Frame {self.frame_index} / {self.slider.maximum()}"
-        )
-
-        self.info_label.setText(
-            "\n".join([
-                f"Focus forklift: {active_instance.get('focus_track_id', '?')}",
-                f"Path: {active_instance.get('robot_path_label', '-')}",
-                "",
-
-                f"Current action: {current.get('action', '-')}",
-                f"Current state: {current.get('runtime_state', '-')}",
-                f"Current scenario: {current.get('scenario', '-')}",
-                f"Current trust: {current.get('trust', '-')}",
-                f"Current TTC: {current.get('ttc', '-')}",
-                f"Current risk: {current.get('risk', 0.0):.2f}",
-
-                "",
-                "Scenario summary",
-
-                f"Result: {summary.get('result', '-')}",
-                f"Trigger action: {summary.get('trigger_action', '-')}",
-                f"Trigger TTC: {summary.get('trigger_ttc', '-')}",
-                f"Trigger trust: {summary.get('trigger_trust', '-')}",
-                f"Trigger frame: {summary.get('trigger_frame', '-')}",
-
-                f"Collision: {summary.get('collision', False)}",
-                f"Near miss: {summary.get('near_miss', False)}",
-                f"Failed test: {summary.get('failed_test', False)}",
-
-                "",
-                (
-                    "Precomputed MVP behavior"
-                    if self.use_precomputed
-                    else "Live MVP behavior"
-                ),
-            ])
-        )
 
 
     def render_live_behavior(self, instances):

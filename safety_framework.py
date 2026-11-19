@@ -14,9 +14,21 @@ import numpy as np
 def route_prediction_uncertainty(
     route_info
 ):
-
     if route_info is None:
         return 1.0
+
+    unc = route_info.get(
+        "uncertainty"
+    )
+
+    if unc is not None:
+        return float(
+            np.clip(
+                unc,
+                0.0,
+                1.0
+            )
+        )
 
     p = route_info.get(
         "prob"
@@ -27,7 +39,7 @@ def route_prediction_uncertainty(
 
     return float(
         np.clip(
-            1.0-float(p),
+            1.0 - float(p),
             0.0,
             1.0
         )
@@ -315,28 +327,48 @@ class DecisionEngine:
         results
     ):
 
+        penalties = {
+            r.name: r.score
+            for r in results
+        }
+
         trust = 1.0
 
-        for result in results:
+        trust -= 0.30 * penalties.get(
+            "camera_ood",
+            0.0
+        )
 
-            w = self.weights.get(
-                result.category,
-                0.1
-            )
+        trust -= 0.20 * penalties.get(
+            "bbox_uncertainty",
+            0.0
+        )
 
-            trust -= (
-                w *
-                result.score
-            )
+        trust -= 0.20 * penalties.get(
+            "trajectory_uncertainty",
+            0.0
+        )
 
-            if result.flag:
-                trust -= 0.05
+        trust -= 0.15 * penalties.get(
+            "track_uncertainty",
+            0.0
+        )
 
-        return max(
-            0.0,
-            min(
-                1.0,
-                trust
+        trust -= 0.10 * penalties.get(
+            "route_uncertainty",
+            0.0
+        )
+
+        trust -= 0.05 * penalties.get(
+            "maneuver_uncertainty",
+            0.0
+        )
+
+        return float(
+            np.clip(
+                trust,
+                0.0,
+                1.0
             )
         )
 

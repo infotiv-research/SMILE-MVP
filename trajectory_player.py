@@ -1506,15 +1506,15 @@ class OnlineClassifier:
         zone = topo["zone"]
         if zone == "I":
             display_label = "INTERSECTION"
-            display_conf = max(
-                route_prob,
-                max(pm.values())
+            display_conf = (
+                0.5 * route_prob
+                + 0.5 * max(pm.values())
             )
         elif zone is None:
             display_label = f"ROUTE {route_pair[0]}→{route_pair[1]}"
-            display_conf = max(
-                route_prob,
-                max(pm.values())
+            display_conf = (
+                0.5 * route_prob
+                + 0.5 * max(pm.values())
             )
         else:
             #
@@ -1532,10 +1532,15 @@ class OnlineClassifier:
             else:
                 direction = "I→"
             display_label = f"B{zone} {direction}"
-            display_conf = max(
-                route_prob,
-                max(pm.values())
+            display_conf = (
+                0.5 * route_prob
+                + 0.5 * max(pm.values())
             )
+        topology_confidence = (
+            max(pm.values())
+            if zone == "I"
+            else route_prob
+        )            
         self._cached_info = {
             "topology_zone": zone,
             "topology_label": display_label,
@@ -1546,6 +1551,7 @@ class OnlineClassifier:
             "mode_probs": pm,
             "display_label": display_label,
             "display_confidence": display_conf,
+            "topology_confidence": topology_confidence,
         }
         return self._cached_info
 
@@ -3000,8 +3006,29 @@ def run_gui(
                             "route": {
                                 "from": int(a),
                                 "to": int(b),
-                                "prob": float(info_i["route_prob"]),
-                                "uncertainty": float(info_i["route_uncertainty"]),
+                                "prob": float(
+                                    info_i["route_prob"]
+                                ),
+                                "uncertainty": float(
+                                    info_i["route_uncertainty"]
+                                ),
+                            },
+                            "topology": {
+                                "zone":
+                                    info_i.get(
+                                        "topology_zone"
+                                    ),
+                                "label":
+                                    info_i.get(
+                                        "topology_label"
+                                    ),
+                                "confidence":
+                                    float(
+                                        info_i.get(
+                                            "topology_confidence",
+                                            0.0
+                                        )
+                                    ),
                             },
                             "mode": info_i["mode"],
                             "mode_probs": {

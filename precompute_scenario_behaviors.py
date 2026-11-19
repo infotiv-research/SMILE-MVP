@@ -187,141 +187,107 @@ class ExistingMvpReplay:
 
 
 def run_existing_viewer(mvp, app, instance):
-    """
-    Run the unmodified MVP decision and motion loop on one instance.
-    Produces per-frame diagnostics and aggregate evaluation metrics.
-    """
+    replay = ExistingMvpReplay(mvp, app, instance)
+    positions, actions, trigger = [], [], None
+    min_ttc, min_trust, max_risk = float("inf"), 1.0, 0.0
 
-    replay = ExistingMvpReplay(
-        mvp,
-        app,
-        instance
+    for index in range(len(mvp.tracks)):
+        position, snapshot = replay.advance_to(index)
+        positions.append(position)
+        actions.append(snapshot)
+
+        ttc = snapshot.get("ttc")
+        trust = float(snapshot.get("trust", 1.0))
+        risk = float(snapshot.get("risk", 0.0))
+        min_trust, max_risk = min(min_trust, trust), max(max_risk, risk)
+        if ttc is not None:
+            min_ttc = min(min_ttc, float(ttc))
+
+        action = snapshot.get("action")
+
+        INTERVENTIONS = {
+            "YIELD",
+            "AVOID_LEFT",
+            "WAIT_BEFORE_INTERSECTION",
+            "DEGRADED_MODE",
+        }
+
+        if trigger is None and action in INTERVENTIONS:
+            trigger = {
+                "frame": index,
+                "action": action,
+                "state": snapshot.get("runtime_state"),
+                "scenario": snapshot.get("scenario"),
+                "ttc": snapshot.get("ttc"),
+                "trust": snapshot.get("trust"),
+                "route_prob": snapshot.get("route_prob"),
+                "route_uncertainty": snapshot.get(
+                    "route_uncertainty"
+                ),
+                "maneuver": snapshot.get("maneuver"),
+                "maneuver_confidence": snapshot.get(
+                    "maneuver_confidence"
+                ),
+                "collision": snapshot.get("collision"),
+                "near_miss": snapshot.get("near_miss"),       
+                "risk": risk,         
+                "topology_label":
+                    snapshot.get(
+                        "topology_label"
+                    ),
+
+                "topology_confidence":
+                    snapshot.get(
+                        "topology_confidence"
+                    ),                
+            }
+            break
+
+    scenario = (trigger or {}).get("scenario")
+    action = (trigger or {}).get("action")
+    ttc = (trigger or {}).get("ttc")
+    hazard = scenario in {"COLLISION_AVOIDANCE", "INTERSECTION_BLOCKAGE"}
+    supervisor_hazard = action == "DEGRADED_MODE" and scenario == "TRUST_DEGRADATION"
+    necessary = hazard or supervisor_hazard
+    timely = ttc is None or float(ttc) >= 2.0
+    correct = (
+        action == "DEGRADED_MODE" if supervisor_hazard
+        else action in {"AVOID_LEFT", "YIELD", "WAIT_BEFORE_INTERSECTION"}
+    )
+    false_positive = (
+        trigger is not None
+        and not necessary
+        and trigger.get("risk", 0.0) < 0.2
     )
 
-    diagnostics = []
-
-    min_ttc = float("inf")
-    min_trust = 1.0
-    max_risk = 0.0
-
-    collision = False
-    near_miss = False
-    failed_test = False
-
-    final_action = "UNKNOWN"
-    trigger_action = None
-    trigger_ttc = None
-    trigger_trust = None
-    trigger_frame = None
-    for index in range(len(mvp.tracks)):
-
-        replay.advance_to(index)
-
-        snapshot = replay.actions[-1]
-        if (
-            trigger_action is None
-            and snapshot.get("action") in ("YIELD","AVOID_LEFT","WAIT_BEFORE_INTERSECTION")
-        ):
-            trigger_action = snapshot.get(
-                "action"
-            )
-
-            trigger_ttc = snapshot.get(
-                "ttc"
-            )
-
-            trigger_trust = snapshot.get(
-                "trust"
-            )
-
-            trigger_frame = index
-        ttc = snapshot.get("ttc")
-        trust = snapshot.get("trust", 1.0)
-        risk = snapshot.get("risk", 0.0)
-
-        if ttc is not None:
-            min_ttc = min(
-                min_ttc,
-                float(ttc)
-            )
-
-        min_trust = min(
-            min_trust,
-            float(trust)
-        )
-
-        max_risk = max(
-            max_risk,
-            float(risk)
-        )
-
-        collision |= bool(
-            snapshot.get("collision")
-        )
-
-        near_miss |= bool(
-            snapshot.get("near_miss")
-        )
-
-        failed_test |= bool(
-            snapshot.get("failed_test")
-        )
-
-        final_action = snapshot.get(
-            "action",
-            final_action
-        )
-
-        diagnostics.append(
-            {
-                "frame": index,
-                "minimum_ttc_s": ttc,
-                "runtime_state": snapshot.get(
-                    "runtime_state"
-                ),
-                "decision_action": snapshot.get(
-                    "action"
-                ),
-                "trust": trust,
-                "risk": risk,
-            }
-        )
+    if trigger is None:
+        outcome = "PASS"
+    elif false_positive:
+        outcome = "FALSE_POSITIVE"
+    elif not timely:
+        outcome = "LATE_ACTION"
+    elif not correct:
+        outcome = "WRONG_ACTION"
+    else:
+        outcome = "PASS"
 
     summary = {
-        "max_risk": float(max_risk),
-        "min_trust": float(min_trust),
-        "min_ttc": (
-            None
-            if min_ttc == float("inf")
-            else float(min_ttc)
-        ),
-        "collision": collision,
-        "near_miss": near_miss,
-        "failed_test": failed_test,
-        "final_action": final_action,
-        "trigger_action": trigger_action,
-        "trigger_ttc": trigger_ttc,
-        "trigger_trust": trigger_trust,
-        "trigger_frame": trigger_frame,
-        "result": (
-            "FAIL"
-            if failed_test
-            else "PASS"
-        ),
+        "result": "PASS" if outcome == "PASS" else "FAIL",
+        "outcome": outcome,
+        "final_action": action or "PROCEED",
+        "max_risk": max_risk,
+        "min_trust": min_trust,
+        "min_ttc": None if min_ttc == float("inf") else min_ttc,
+        "collision": bool((trigger or {}).get("collision")),
+        "near_miss":bool((trigger or {}).get("near_miss")),
+        "failed_test": outcome != "PASS",
+        "false_positive": false_positive,
+        "trigger": trigger,
     }
-
-    positions = replay.positions
-    actions = replay.actions
 
     replay.viewer.deleteLater()
     app.processEvents()
-
-    return (
-        positions,
-        actions,
-        diagnostics,
-        summary,
-    )
+    return positions, actions, [], summary
 
 
 def artifacts(selected):
@@ -399,26 +365,46 @@ def main():
                 ),
             }
             summary_rows.append({
-                "instance_id": instance["id"],
-                "window_id": instance.get("window_id"),
-                "focus_track_id": instance.get(
-                    "focus_track_id"
-                ),
-                "path_label": instance.get(
-                    "robot_path_label",
-                    ""
-                ),
-                **summary,
-            })            
+                "instance_id":instance["id"],
+                "window_id":instance.get("window_id"),
+                "focus_track_id":instance.get("focus_track_id"),
+                "path_label":instance.get("robot_path_label",""),
+                "result":summary["result"],
+                "outcome": summary["outcome"],
+                "false_positive": summary["false_positive"],                
+                "final_action":summary["final_action"],
+                "max_risk":summary["max_risk"],
+                "min_trust":summary["min_trust"],
+                "min_ttc":summary["min_ttc"],
+                "collision":summary["collision"],
+                "near_miss":summary["near_miss"],
+                "failed_test":summary["failed_test"],
+                "trigger_action":(summary["trigger"] or {}).get("action"),
+                "trigger_state":(summary["trigger"] or {}).get("state"),
+                "trigger_scenario":(summary["trigger"] or {}).get("scenario"),
+                "trigger_ttc":(summary["trigger"] or {}).get("ttc"),
+                "trigger_trust":(summary["trigger"] or {}).get("trust"),
+                "trigger_frame":(summary["trigger"] or {}).get("frame"),
+                "route_prob":(summary["trigger"] or {}).get("route_prob"),
+                "route_uncertainty":(summary["trigger"] or {}).get("route_uncertainty"),
+                "maneuver":(summary["trigger"] or {}).get("maneuver"),
+                "maneuver_confidence":(summary["trigger"] or {}).get("maneuver_confidence"),
+                "topology_label":
+                    (summary["trigger"] or {})
+                    .get("topology_label"),
+
+                "topology_confidence":
+                    (summary["trigger"] or {})
+                    .get("topology_confidence"),                
+            }) 
         destination = args.output_dir / default_destination.name if args.output_dir else default_destination
         write_json(destination, payload)
         print("Wrote {} from the existing MVP supervisor ({} instances)".format(destination, len(instances)))
     if summary_rows:
-
-        csv_path = (
-            (args.output_dir or ROOT)
-            / "scenario_summary.csv"
-        )
+        if args.output_dir:
+            csv_path = (args.output_dir/"scenario_summary.csv")
+        else:
+            csv_path = (default_destination.parent/"scenario_summary.csv")
 
         write_summary_csv(
             csv_path,

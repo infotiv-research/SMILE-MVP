@@ -285,45 +285,61 @@ def estimate_track_uncertainty(
     frame_idx,
     track_id
 ):
-
-    hist = TRACK_UNCERTAINTY.get(
-        track_id
+    hist = TRACK_HISTORY.get(
+        track_id,
+        []
     )
 
-    if not hist or len(hist) < 3:
+    if len(hist) < 3:
         return 0.0
 
-    recent = hist[-5:]
+    recent = [
+        h
+        for h in hist
+        if h[0] <= frame_idx
+    ][-10:]
 
-    centers = np.asarray(
-        [r["center"] for r in recent]
+    if len(recent) < 3:
+        return 0.0
+
+    pts = np.asarray(
+        [
+            (h[1], h[2])
+            for h in recent
+        ],
+        dtype=float
     )
 
-    areas = np.asarray(
-        [r["area"] for r in recent]
+    vel = np.diff(
+        pts,
+        axis=0
+    )
+
+    if len(vel) < 2:
+        return 0.0
+
+    speed = np.linalg.norm(
+        vel,
+        axis=1
+    )
+
+    mean_speed = np.mean(
+        speed
+    )
+
+    if mean_speed <= 1e-6:
+        return 0.0
+
+    score = (
+        np.std(speed)
+        / mean_speed
     )
 
     return float(
         np.clip(
-            0.7 *
-            min(
-                1.0,
-                np.linalg.norm(
-                    centers.std(0)
-                ) / 15
-            )
-            +
-            0.3 *
-            min(
-                1.0,
-                areas.std()
-                /
-                (
-                    areas.mean()+1e-6
-                )
-            ),
-            0,
-            1
+            score,
+            0.0,
+            1.0
         )
     )
 # ==========================================================
@@ -1118,9 +1134,7 @@ class TrajectoryConflictScenario:
             )
 
         highest_risk = 0.0
-
-        conflict_track = None
-
+        conflicting_tracks = []
         conflict_distance = np.inf
 
         for obj in scene.frame["objects"]:
@@ -1157,10 +1171,11 @@ class TrajectoryConflictScenario:
                     1.0
                 )
 
-                if risk > highest_risk:
+                if risk > 0.25:
+                    conflicting_tracks.append(tid)
 
+                if risk > highest_risk:
                     highest_risk = risk
-                    conflict_track = tid
                     conflict_distance = d
 
         return ScenarioResult(
@@ -1176,17 +1191,14 @@ class TrajectoryConflictScenario:
             ),
 
             details={
-
-                "conflicting_track":
-                    conflict_track,
-
+                "conflicting_tracks":
+                    list(set(conflicting_tracks)),
+                "conflict_count":
+                    len(set(conflicting_tracks)),
                 "minimum_distance":
-                    float(
-                        conflict_distance
-                    ),
-
+                    float(conflict_distance),
                 "avoid_side":
-                    "LEFT"
+                    "LEFT",
             }
         )
     
@@ -1772,7 +1784,34 @@ class MVPViewer(FigureCanvasQTAgg):
             ),
             default=np.inf
         )
+        mode = self.mode_info or {}
 
+        mode_name = mode.get(
+            "mode"
+        )
+
+        mode_probs = mode.get(
+            "mode_probs",
+            {}
+        )
+
+        maneuver_conf = float(
+            mode_probs.get(
+                mode_name,
+                1.0
+            )
+        )
+
+        maneuver_unc = (
+            1.0
+            - maneuver_conf
+        )
+
+        effective_ttc = max(
+            0.0,
+            self.minimum_ttc
+            - 2.0 * maneuver_unc
+        )
         scene = SceneContext(
             timestamp=self.current_timestamp,
             frame_idx=self.frame_idx,
@@ -1780,7 +1819,7 @@ class MVPViewer(FigureCanvasQTAgg):
             frame=frame,
             route_prediction=self.route_info,
             maneuver_prediction=self.mode_info,
-            ttc=self.minimum_ttc,
+            ttc=effective_ttc,
             extra={
                 "alert_ood": self.alert_ood,
                 "viewer": self,
@@ -1853,32 +1892,72 @@ class MVPViewer(FigureCanvasQTAgg):
             intersection_risk
         )
 
-        conflict_count = sum(
-            1
-            for obj in frame["objects"]
-            if self.compute_ttc(obj) < 4.0
+        conflict_count = (
+            traj.details.get(
+                "conflict_count",
+                0
+            )
+            if traj
+            else 0
+        )
+        label = getattr(
+            self,
+            "display_label",
+            ""
         )
 
-        if trust < 0.25:
+        route_relevant = (
+            "I" in str(label)
+        )
 
-            yield_threshold = 0.30
-            avoid_threshold = 0.55
+        if not route_relevant:
+            conflict_count = 0
+            conflict_risk *= 0.5
+        trust_deficit = max(
+            0.0,
+            0.85 - trust
+        )
 
-        elif trust < 0.50:
+        ttc_horizon = (
+            4.0
+            + 4.0 * trust_deficit
+        )
 
-            yield_threshold = 0.40
-            avoid_threshold = 0.65
+        yield_threshold = max(
+            0.30,
+            0.50 - 0.20 * trust_deficit
+        )
 
-        else:
-
-            yield_threshold = 0.50
-            avoid_threshold = 0.75
+        avoid_threshold = max(
+            0.50,
+            0.75 - 0.25 * trust_deficit
+        )
 
 
         force_degraded = (
             self.runtime_state == "UNSAFE"
         )
+        if (
+            np.isfinite(
+                self.minimum_ttc
+            )
+            and
+            self.minimum_ttc < ttc_horizon
+        ):
 
+            if conflict_count >= 2:
+
+                self.decision_action = (
+                    "YIELD"
+                )
+
+            elif conflict_count == 1:
+
+                self.decision_action = (
+                    "AVOID_LEFT"
+                )
+
+            return
         if force_degraded:
 
             self.decision_action = (
@@ -2846,10 +2925,6 @@ class MVPViewer(FigureCanvasQTAgg):
                 )        
 
         if pred is None:
-            print(
-                f"[NO_PRED] ts={self.current_timestamp} "
-                f"track={self.active_track_id}"
-            )
             return
 
         self.route_info = pred.get(
@@ -2857,6 +2932,15 @@ class MVPViewer(FigureCanvasQTAgg):
         )
 
         self.mode_info = pred
+
+        self.display_label = pred.get(
+            "display_label"
+        )
+
+        self.topology_info = pred.get(
+            "topology",
+            {}
+        )
         route = self.route_info
 
         if route is not None:
@@ -3755,20 +3839,30 @@ class MainWindow(QMainWindow):
         )
 
         if route:
-
-            self.set_label(
-                self.label_route,
-                "Route : "
-                +
-                (
-                    route.get(
-                        "display_label"
-                    )
-                    or
-                    f"{route.get('from','?')} → "
-                    f"{route.get('to','?')}"
-                )
+            label = getattr(
+                v,
+                "display_label",
+                None
             )
+
+            if label:
+
+                self.set_label(
+                    self.label_route,
+                    f"Topology : {label}"
+                )
+
+            else:
+
+                self.set_label(
+                    self.label_route,
+                    (
+                        f"Route : "
+                        f"{route.get('from','?')}"
+                        f" -> "
+                        f"{route.get('to','?')}"
+                    )
+                )
 
             self.set_label(
                 self.label_route_prob,
