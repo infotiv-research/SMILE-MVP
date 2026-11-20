@@ -327,36 +327,176 @@ class ScenarioReplayWindow(QMainWindow):
         self.render()
 
     def render(self):
-        instances=self.selected_instances()
+
+        instances = self.selected_instances()
+
         if not self.use_precomputed:
-            self.render_live_behavior(instances)
-        self.canvas.render_replay(instances,self.frame_index)
+            self.render_live_behavior(
+                instances
+            )
 
-        active=instances[0]
-        current=ReplayCanvas.cached_result(active,self.frame_index)
-        summary=active.get('precomputed_behavior',{}).get('summary',{})
-        trigger=summary.get('trigger') or {}
+        self.canvas.render_replay(
+            instances,
+            self.frame_index
+        )
 
-        self.frame_label.setText(f'Frame {self.frame_index} / {self.slider.maximum()}')
+        self.frame_label.setText(
+            f"Frame {self.frame_index} / {self.slider.maximum()}"
+        )
 
-        self.info_label.setText('\n'.join([
-            f"Focus forklift: {active.get('focus_track_id','?')}",
-            f"Path: {active.get('robot_path_label','-')}",
-            '',
-            f"Action: {current.get('action','-')}",
-            f"State: {current.get('runtime_state','-')}",
-            f"Scenario: {current.get('scenario','-')}",
-            f"Trust: {current.get('trust','-')}",
-            f"TTC: {current.get('ttc','-')}",
-            f"Risk: {current.get('risk',0.0):.2f}",
-            f"Route prob: {current.get('route_prob','-')}",
-            f"Route unc: {current.get('route_uncertainty','-')}",
-            f"Maneuver: {current.get('maneuver','-')}",
-            f"Maneuver conf: {current.get('maneuver_confidence','-')}",
-            'Precomputed MVP behavior' if self.use_precomputed else 'Live MVP behavior'
-        ]))
+        multi = (
+            self.path_select.currentData()
+            == "__all__"
+        )
 
+        if multi:
 
+            summaries = [
+                i.get(
+                    "precomputed_behavior",
+                    {}
+                ).get(
+                    "summary",
+                    {}
+                )
+                for i in instances
+            ]
+
+            pass_count = sum(
+                s.get("result") == "PASS"
+                for s in summaries
+            )
+
+            fail_count = len(
+                summaries
+            ) - pass_count
+
+            outcomes = {}
+
+            for s in summaries:
+
+                key = s.get(
+                    "outcome",
+                    "UNKNOWN"
+                )
+
+                outcomes[key] = (
+                    outcomes.get(
+                        key,
+                        0
+                    ) + 1
+                )
+
+            actions = {}
+
+            for s in summaries:
+
+                trigger = (
+                    s.get("trigger")
+                    or {}
+                )
+
+                key = trigger.get(
+                    "action",
+                    "NONE"
+                )
+
+                actions[key] = (
+                    actions.get(
+                        key,
+                        0
+                    ) + 1
+                )
+
+            self.info_label.setText(
+                "\n".join([
+                    f"Time window: {self.window_select.currentData()}",
+                    f"Robot paths: {len(instances)}",
+                    "",
+                    f"PASS: {pass_count}",
+                    f"FAIL: {fail_count}",
+                    "",
+                    "Actions:",
+                    ", ".join(
+                        f"{k}={v}"
+                        for k, v in
+                        sorted(actions.items())
+                    ),
+                    "",
+                    "Outcomes:",
+                    ", ".join(
+                        f"{k}={v}"
+                        for k, v in
+                        sorted(outcomes.items())
+                    ),
+                    "",
+                    (
+                        "Precomputed MVP behavior"
+                        if self.use_precomputed
+                        else "Live MVP behavior"
+                    ),
+                ])
+            )
+
+            return
+
+        active = instances[0]
+
+        current = ReplayCanvas.cached_result(
+            active,
+            self.frame_index
+        )
+
+        summary = (
+            active
+            .get(
+                "precomputed_behavior",
+                {}
+            )
+            .get(
+                "summary",
+                {}
+            )
+        )
+
+        trigger = (
+            summary.get(
+                "trigger"
+            )
+            or {}
+        )
+
+        self.info_label.setText(
+            "\n".join([
+                f"Forklift: {active.get('focus_track_id', '?')}",
+                f"Path: {active.get('robot_path_label', '-')}",
+                "",
+                f"Action: {current.get('action','-')}",
+                f"State: {current.get('runtime_state','-')}",
+                f"Scenario: {current.get('scenario','-')}",
+                "",
+                f"TTC: {current.get('ttc','-')}",
+                f"Trust: {current.get('trust','-')}",
+                f"Risk: {current.get('risk',0.0):.2f}",
+                "",
+                f"Trigger: {trigger.get('action','-')}",
+                f"Trigger TTC: {trigger.get('ttc','-')}",
+                f"Trigger Trust: {trigger.get('trust','-')}",
+                "",
+                f"Topology: {trigger.get('topology_label','-')}",
+                f"Topology Conf: {trigger.get('topology_confidence','-')}",
+                "",
+                f"Outcome: {summary.get('outcome','-')}",
+                f"Result: {summary.get('result','-')}",
+                f"Expected: {summary.get('expected_action','-')}",
+                "",
+                (
+                    "Precomputed MVP behavior"
+                    if self.use_precomputed
+                    else "Live MVP behavior"
+                ),
+            ])
+        )
 
     def render_live_behavior(self, instances):
 

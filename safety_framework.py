@@ -339,7 +339,7 @@ class DecisionEngine:
             0.0
         )
 
-        trust -= 0.20 * penalties.get(
+        trust -= 0.10 * penalties.get(
             "bbox_uncertainty",
             0.0
         )
@@ -363,7 +363,14 @@ class DecisionEngine:
             "maneuver_uncertainty",
             0.0
         )
-
+        trust -= 0.10 * penalties.get(
+            "safety_margin",
+            0.0
+        )
+        trust -= 0.10 * penalties.get(
+            "plausibility",
+            0.0
+        )        
         return float(
             np.clip(
                 trust,
@@ -547,4 +554,90 @@ class SurrogateSupervisor(
                 "status":
                     "not_implemented"
             }
+        )
+
+class SafetyMarginSupervisor(
+    Supervisor
+):
+    name = "safety_margin"
+    category = "uncertainty"
+
+    def evaluate(
+        self,
+        scene,
+    ):
+        ttc = scene.ttc
+
+        if not np.isfinite(ttc):
+
+            return SupervisorResult(
+                name=self.name,
+                category=self.category,
+                score=0.0,
+                confidence=1.0,
+                flag=False,
+            )
+
+        score = np.clip(
+            (
+                2.0
+                - ttc
+            )
+            / 2.0,
+            0.0,
+            1.0,
+        )
+
+        return SupervisorResult(
+            name=self.name,
+            category=self.category,
+            score=float(score),
+            confidence=1.0-score,
+            flag=(score > 0.5),
+        )
+
+class PlausibilitySupervisor(
+    Supervisor
+):
+    name = "plausibility"
+    category = "uncertainty"
+
+    def evaluate(self, scene):
+
+        route_unc = route_prediction_uncertainty(
+            scene.route_prediction
+        )
+
+        maneuver_unc = maneuver_uncertainty(
+            scene.maneuver_prediction
+        )
+
+        viewer = scene.extra.get("viewer")
+
+        topology_conf = 1.0
+
+        if viewer is not None:
+
+            topology_conf = float(
+                (
+                    viewer.topology_info
+                    or {}
+                ).get(
+                    "confidence",
+                    1.0
+                )
+            )
+
+        score = max(
+            route_unc,
+            maneuver_unc,
+            1.0 - topology_conf,
+        )
+
+        return SupervisorResult(
+            name=self.name,
+            category=self.category,
+            score=float(score),
+            confidence=1.0 - score,
+            flag=(score > 0.5),
         )

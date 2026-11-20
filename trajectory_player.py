@@ -3317,23 +3317,56 @@ def main():
                     preds.append(
                         {
                             "track_id": int(tid),
+
                             "route": {
                                 "from": int(a),
                                 "to": int(b),
-                                "prob": float(info_i["route_prob"]),
+                                "prob": float(
+                                    info_i["route_prob"]
+                                ),
                                 "uncertainty": float(
                                     info_i["route_uncertainty"]
                                 ),
                             },
-                            "mode": info_i["mode"],
+
+                            "topology": {
+                                "zone":
+                                    info_i.get(
+                                        "topology_zone"
+                                    ),
+
+                                "label":
+                                    info_i.get(
+                                        "topology_label"
+                                    ),
+
+                                "confidence":
+                                    float(
+                                        info_i.get(
+                                            "topology_confidence",
+                                            0.0
+                                        )
+                                    ),
+                            },
+
+                            "mode":
+                                info_i["mode"],
+
                             "mode_probs": {
                                 k: float(v)
-                                for k, v in info_i["mode_probs"].items()
+                                for k, v in
+                                info_i["mode_probs"].items()
                             },
-                            "display_label": info_i["display_label"],
-                            "display_confidence": float(
-                                info_i["display_confidence"]
-                            ),
+
+                            "display_label":
+                                info_i["display_label"],
+
+                            "display_confidence":
+                                float(
+                                    info_i[
+                                        "display_confidence"
+                                    ]
+                                ),
                         }
                     )
 

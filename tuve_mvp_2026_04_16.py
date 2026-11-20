@@ -36,7 +36,9 @@ from safety_framework import (
     TrajectoryUncertaintySupervisor,
     RouteUncertaintySupervisor,
     ManeuverUncertaintySupervisor,
-    DecisionEngine
+    DecisionEngine,
+    PlausibilitySupervisor,
+    SafetyMarginSupervisor
 )
 from dataclasses import dataclass, field
 
@@ -79,11 +81,93 @@ OOD_CACHE = {}
 
 MODEL = MLModel.load(MODEL_PATH)
 ENTRY_ELLIPSES = MODEL.entry_ellipses
-INTERSECTION_POLY = getattr(
-    MODEL,
-    "intersection_poly",
-    None
+
+def load_scenario_polygon(path):
+    with open(path, "r") as f:
+        data = json.load(f)
+
+    return np.asarray(
+        data["polygon_image_px"],
+        dtype=float
+    )
+
+SCENARIO_PATHS = CFG["scenario_paths"]
+
+INTERSECTION_AREA_PX = load_scenario_polygon(
+    Path(
+        SCENARIO_PATHS["intersection_area"]
+    )
 )
+
+ROBOT_OPERATING_AREA_PX = (
+    load_scenario_polygon(
+        Path(
+            SCENARIO_PATHS[
+                "robot_operating_area"
+            ]
+        )
+    )
+)
+
+# ==========================================================
+# SAFETY POLICY PARAMETERS
+# ==========================================================
+
+TRUST_TARGET = 0.85
+TRUST_UNSAFE = 0.25
+FAIL_TTC_SEC = 2.0
+TTC_HORIZON_BASE = 4.0
+INTERSECTION_LOOKAHEAD_SEC = 15.0
+def safety_policy(trust):
+
+    trust_deficit = max(
+        0.0,
+        TRUST_TARGET - trust
+    )
+
+    trust_span = max(
+        1e-6,
+        TRUST_TARGET - TRUST_UNSAFE
+    )
+
+    trust_factor = min(
+        1.0,
+        trust_deficit / trust_span
+    )
+
+    risk_threshold = (
+        1.0
+        - trust_factor
+    ) * TRUST_TARGET
+
+    topology_threshold = (
+        risk_threshold
+    )
+
+    return {
+        "ttc_horizon":
+            TTC_HORIZON_BASE
+            * (1.0 + trust_factor),
+
+        "risk_threshold":
+            risk_threshold,
+
+        "topology_threshold":
+            topology_threshold,
+    }
+def trust_levels():
+
+    span = TRUST_TARGET - TRUST_UNSAFE
+
+    return {
+        "warning":
+            TRUST_UNSAFE
+            + span / 2.0,
+
+        "normal":
+            TRUST_TARGET
+            - span / 4.0,
+    }
 
 # ==========================================================
 # LOAD STATIC DATA
@@ -741,7 +825,7 @@ class IntersectionOccupancyScenario:
     name = "intersection_occupancy"
     category = "scenario"
 
-    OCCUPANCY_TIME = 3.0
+    OCCUPANCY_TIME = (1.5 * FAIL_TTC_SEC)
 
     @staticmethod
     def point_in_poly(point, poly):
@@ -866,7 +950,7 @@ class IntersectionOccupancyScenario:
         )
 
         poly_world = scene.extra.get(
-            "intersection_poly"
+            "INTERSECTION_AREA_PX"
         )
 
         if (
@@ -880,8 +964,9 @@ class IntersectionOccupancyScenario:
                 details={}
             )
 
-        poly_occ = world_poly_to_occ(
-            poly_world
+        poly_occ = np.asarray(
+            poly_world,
+            dtype=float
         )
 
         if (
@@ -920,9 +1005,18 @@ class IntersectionOccupancyScenario:
                 details={}
             )
 
+        path = DEFAULT_PATHS.get(
+            viewer.current_path_name
+        )
+
         robot_speed = max(
             0.5,
-            viewer.agent_speed_factor
+            (
+                path.speed
+                if path is not None
+                else 1.0
+            )
+            * viewer.agent_speed_factor
         )
 
         robot_eta = (
@@ -935,7 +1029,7 @@ class IntersectionOccupancyScenario:
         # intersection
         #
 
-        if robot_eta > 5.0:
+        if robot_eta > INTERSECTION_LOOKAHEAD_SEC:
 
             return ScenarioResult(
                 name=self.name,
@@ -950,22 +1044,8 @@ class IntersectionOccupancyScenario:
         best_risk = 0.0
         conflict_track = None
 
-        active_track = getattr(
-            viewer,
-            "active_track_id",
-            None
-        )
-
         for obj in scene.frame["objects"]:
-
             tid = obj["track_id"]
-
-            if (
-                active_track is not None
-                and tid != active_track
-            ):
-                continue
-
             cx, cy = get_occ_center(obj)
 
             vx, vy = obj["velocity_world"]
@@ -1062,10 +1142,8 @@ class TrajectoryConflictScenario:
 
     name = "trajectory_conflict"
     category = "scenario"
-
-    SAFE_DISTANCE = 80.0
-    CRITICAL_DISTANCE = 40.0
-
+    SAFE_DISTANCE = 80
+    CRITICAL_DISTANCE = 40
     LOOKAHEAD_POINTS = 10
 
     def evaluate(self, scene):
@@ -1147,6 +1225,15 @@ class TrajectoryConflictScenario:
                 [cx, cy],
                 dtype=float
             )
+            if (
+                ROBOT_OPERATING_AREA_PX is not None
+                and
+                not point_in_polygon(
+                    obj_pos,
+                    ROBOT_OPERATING_AREA_PX
+                )
+            ):
+                continue            
 
             for p in future_points:
 
@@ -1157,10 +1244,9 @@ class TrajectoryConflictScenario:
                 if d >= self.SAFE_DISTANCE:
                     continue
 
-                risk = np.clip(
+                distance_risk = np.clip(
                     (
-                        self.SAFE_DISTANCE
-                        - d
+                        self.SAFE_DISTANCE - d
                     )
                     /
                     (
@@ -1171,6 +1257,22 @@ class TrajectoryConflictScenario:
                     1.0
                 )
 
+                ttc = scene.ttc
+
+                if np.isfinite(ttc):
+
+                    ttc_factor = np.clip(
+                        1.0 - ttc / (5.0 * FAIL_TTC_SEC),
+                        0.0,
+                        1.0
+                    )
+
+                else:
+
+                    ttc_factor = 1.0
+
+                risk = distance_risk * ttc_factor
+
                 if risk > 0.25:
                     conflicting_tracks.append(tid)
 
@@ -1179,26 +1281,14 @@ class TrajectoryConflictScenario:
                     conflict_distance = d
 
         return ScenarioResult(
-
             name=self.name,
-
-            score=float(
-                highest_risk
-            ),
-
-            flag=(
-                highest_risk > 0.5
-            ),
-
+            score=float(highest_risk),
+            flag=(highest_risk >  0.50),
             details={
-                "conflicting_tracks":
-                    list(set(conflicting_tracks)),
-                "conflict_count":
-                    len(set(conflicting_tracks)),
-                "minimum_distance":
-                    float(conflict_distance),
-                "avoid_side":
-                    "LEFT",
+                "conflicting_tracks": list(set(conflicting_tracks)),
+                "conflict_count": len(set(conflicting_tracks)),
+                "minimum_distance": float(conflict_distance),
+                "avoid_side": "LEFT",
             }
         )
     
@@ -1356,6 +1446,36 @@ def world_poly_to_occ(poly):
         out,
         dtype=float
     )
+
+def point_in_polygon(point, poly):
+
+    x, y = point
+
+    inside = False
+    j = len(poly) - 1
+
+    for i in range(len(poly)):
+
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+
+        if (
+            ((yi > y) != (yj > y))
+            and
+            (
+                x <
+                (xj - xi)
+                * (y - yi)
+                /
+                (yj - yi + 1e-12)
+                + xi
+            )
+        ):
+            inside = not inside
+
+        j = i
+
+    return inside
 # ==========================================================
 # VIEWER
 # ==========================================================
@@ -1392,11 +1512,11 @@ class MVPViewer(FigureCanvasQTAgg):
         self.path_target = None        
         self.intersection_patch = None
         self.intersection_label = None
-
+        self.operating_area_patch = None
         self.track_history = {}        
-
         self.frame_idx = 0
         self.draw_entry_points()
+        self.draw_operating_area()
         self.draw_intersection()
 
         self.alert_collision = False
@@ -1409,6 +1529,8 @@ class MVPViewer(FigureCanvasQTAgg):
         self.target_lane_offset = 0.0
         self.route_info = None
         self.mode_info = None
+        self.topology_info = {}
+        self.display_label = None
         self.operator_speed_factor = 1.0
         self.track_ids_current = []
         self.trajectory_artist = None        
@@ -1447,6 +1569,12 @@ class MVPViewer(FigureCanvasQTAgg):
         self.supervisor_manager.register(
             ManeuverUncertaintySupervisor()
         )
+        # self.supervisor_manager.register(
+        #     PlausibilitySupervisor()
+        # )
+        # self.supervisor_manager.register(
+        #     SafetyMarginSupervisor()
+        # )
         self.scenario_engine = (
             ScenarioEngine()
         )
@@ -1524,13 +1652,256 @@ class MVPViewer(FigureCanvasQTAgg):
             self.on_motion
         )
 
-    def draw_intersection(self):
+    def evaluate_groundtruth_action(
+        self,
+        frame,
+    ):
+        """
+        Supervisor-independent truth label.
 
-        if INTERSECTION_POLY is None:
+        Produces the action that SHOULD
+        be taken based purely on physical risk.
+        """
+
+        hazards = self.evaluate_raw_hazards(
+            frame
+        )
+
+        if hazards["collision"]:
+            return {
+                "expected_action":
+                    "EMERGENCY_STOP",
+                "reason":
+                    "COLLISION",
+                "hazards":
+                    hazards,
+            }
+
+        if (
+            hazards[
+                "corridor_conflict_count"
+            ]
+            >= 2
+        ):
+            return {
+                "expected_action":
+                    "YIELD",
+                "reason":
+                    "CORRIDOR_MULTI",
+                "hazards":
+                    hazards,
+            }
+
+        if (
+            hazards[
+                "corridor_conflict_count"
+            ]
+            == 1
+        ):
+            return {
+                "expected_action":
+                    "AVOID_LEFT",
+                "reason":
+                    "CORRIDOR_CONFLICT",
+                "hazards":
+                    hazards,
+            }
+
+        if hazards[
+            "intersection_conflict"
+        ]:
+            return {
+                "expected_action":
+                    "YIELD",
+                "reason":
+                    "INTERSECTION_BLOCKAGE",
+                "hazards":
+                    hazards,
+            }
+
+        return {
+            "expected_action":
+                "PROCEED",
+            "reason":
+                "NONE",
+            "hazards":
+                hazards,
+        }
+
+    def evaluate_raw_hazards(
+        self,
+        frame,
+    ):
+        """
+        Supervisor-independent hazard extraction.
+
+        Uses:
+            compute_scene_info()
+            compute_ttc()
+            TrajectoryConflictScenario
+            IntersectionOccupancyScenario
+
+        Does NOT use:
+
+            SupervisorManager
+            DecisionEngine
+            topology gating
+            trust
+            uncertainty
+            plausibility
+            safety margin
+
+        Intended for precompute ground truth.
+        """
+
+        self.minimum_ttc = min(
+            (
+                self.compute_ttc(obj)
+                for obj in frame["objects"]
+            ),
+            default=np.inf,
+        )
+
+        scene = SceneContext(
+            timestamp=self.current_timestamp,
+            frame_idx=self.frame_idx,
+            active_track_id=self.active_track_id,
+            frame=frame,
+            route_prediction=None,
+            maneuver_prediction=None,
+            ttc=self.minimum_ttc,
+            extra={
+                "viewer": self,
+                "INTERSECTION_AREA_PX":
+                    INTERSECTION_AREA_PX,
+                "track_history":
+                    TRACK_HISTORY,
+                "track_bbox_model":
+                    TRACK_BBOX_MODEL,
+            },
+        )
+
+        scenario_results = {
+            result.name: result
+            for result in
+            self.scenario_engine.evaluate(
+                scene
+            )
+        }
+
+        traj = scenario_results.get(
+            "trajectory_conflict"
+        )
+
+        intersection = scenario_results.get(
+            "intersection_occupancy"
+        )
+
+        conflict_count = (
+            traj.details.get(
+                "conflict_count",
+                0,
+            )
+            if traj
+            else 0
+        )
+
+        conflict_risk = (
+            float(traj.score)
+            if traj
+            else 0.0
+        )
+
+        intersection_risk = (
+            float(intersection.score)
+            if intersection
+            else 0.0
+        )
+
+        return {
+            "collision":
+                bool(
+                    self.alert_collision
+                ),
+
+            "minimum_ttc":
+                (
+                    float(self.minimum_ttc)
+                    if np.isfinite(
+                        self.minimum_ttc
+                    )
+                    else None
+                ),
+
+            "corridor_conflict":
+                conflict_count > 0,
+
+            "corridor_conflict_count":
+                conflict_count,
+
+            "corridor_risk":
+                conflict_risk,
+
+            "corridor_tracks":
+                (
+                    traj.details.get(
+                        "conflicting_tracks",
+                        [],
+                    )
+                    if traj
+                    else []
+                ),
+
+            "corridor_distance":
+                (
+                    traj.details.get(
+                        "minimum_distance"
+                    )
+                    if traj
+                    else None
+                ),
+
+            "intersection_conflict":
+                intersection_risk > 0.0,
+
+            "intersection_risk":
+                intersection_risk,
+        }
+
+    def draw_operating_area(self):
+
+        if ROBOT_OPERATING_AREA_PX is None:
             return
 
-        poly = world_poly_to_occ(
-            INTERSECTION_POLY
+        poly = np.asarray(
+            ROBOT_OPERATING_AREA_PX,
+            dtype=float
+        )
+
+        if self.operating_area_patch is None:
+
+            self.operating_area_patch = self.ax.fill(
+                poly[:,0],
+                poly[:,1],
+                color="limegreen",
+                alpha=0.12,
+                zorder=5
+            )[0]
+
+        else:
+
+            self.operating_area_patch.set_xy(
+                poly
+            )
+
+    def draw_intersection(self):
+
+        if INTERSECTION_AREA_PX is None:
+            return
+
+        poly = np.asarray(
+            INTERSECTION_AREA_PX,
+            dtype=float
         )
 
         if poly is None:
@@ -1643,8 +2014,8 @@ class MVPViewer(FigureCanvasQTAgg):
         avoid_side="LEFT"
     ):
 
-        ENTER_THRESHOLD = 0.75
-        EXIT_THRESHOLD  = 0.40
+        ENTER_THRESHOLD = AVOID_ENTER_THRESHOLD
+        EXIT_THRESHOLD = AVOID_EXIT_THRESHOLD
 
         if (
             not self.avoidance_active
@@ -1810,7 +2181,7 @@ class MVPViewer(FigureCanvasQTAgg):
         effective_ttc = max(
             0.0,
             self.minimum_ttc
-            - 2.0 * maneuver_unc
+            - FAIL_TTC_SEC * maneuver_unc
         )
         scene = SceneContext(
             timestamp=self.current_timestamp,
@@ -1823,7 +2194,7 @@ class MVPViewer(FigureCanvasQTAgg):
             extra={
                 "alert_ood": self.alert_ood,
                 "viewer": self,
-                "intersection_poly": INTERSECTION_POLY,
+                "INTERSECTION_AREA_PX": INTERSECTION_AREA_PX,
                 "track_history": TRACK_HISTORY,
                 "track_bbox_model": TRACK_BBOX_MODEL,
             }
@@ -1845,7 +2216,18 @@ class MVPViewer(FigureCanvasQTAgg):
             r.name: r
             for r in self.supervisor_results
         }
+        bbox_uncertainty = (
+            trust_results
+            .get(
+                "bbox_uncertainty"
+            )
+        )
 
+        bbox_score = (
+            bbox_uncertainty.score
+            if bbox_uncertainty
+            else 0.0
+        )
         scenario_results = {
             r.name: r
             for r in self.scenario_results
@@ -1861,11 +2243,12 @@ class MVPViewer(FigureCanvasQTAgg):
 
         self.current_trust = trust
 
-        if trust < 0.25:
+        levels = trust_levels()
+        if trust < TRUST_UNSAFE:
             self.runtime_state = "UNSAFE"
-        elif trust < 0.50:
+        elif trust < levels["warning"]:
             self.runtime_state = "WARNING"
-        elif trust < 0.70:
+        elif trust < levels["normal"]:
             self.runtime_state = "DEGRADED"
         else:
             self.runtime_state = "NORMAL"
@@ -1877,12 +2260,69 @@ class MVPViewer(FigureCanvasQTAgg):
         intersection = scenario_results.get(
             "intersection_occupancy"
         )
+        topology = (
+            getattr(
+                self,
+                "topology_info",
+                {}
+            )
+            or {}
+        )
 
+        topology_confidence = float(
+            topology.get(
+                "confidence",
+                0.0
+            )
+        )
+        policy = safety_policy(
+            trust
+        )
+
+        ttc_horizon = (
+            policy[
+                "ttc_horizon"
+            ]
+            *
+            (
+                1.0
+                + 0.5
+                * bbox_score
+            )
+        )
+        risk_threshold = policy[
+            "risk_threshold"
+        ]
+        topology_threshold = policy[
+            "topology_threshold"
+        ]         
         conflict_risk = (
             traj.score
             if traj else 0.0
         )
 
+        conflict_risk = min(
+            1.0,
+            conflict_risk
+            *
+            (
+                1.0
+                + 0.5
+                * bbox_score
+            )
+        )
+        if (
+            np.isfinite(self.minimum_ttc)
+            and self.minimum_ttc >
+                2.0 * TTC_HORIZON_BASE
+        ):
+            conflict_risk *= (
+                topology_confidence
+                / max(
+                    topology_threshold,
+                    1e-6
+                )
+            )
         intersection_risk = (
             intersection.score
             if intersection else 0.0
@@ -1900,89 +2340,92 @@ class MVPViewer(FigureCanvasQTAgg):
             if traj
             else 0
         )
-        label = getattr(
-            self,
-            "display_label",
-            ""
-        )
 
-        route_relevant = (
-            "I" in str(label)
-        )
-
-        if not route_relevant:
+        if topology_confidence < (
+            1.0 - topology_threshold
+        ):
             conflict_count = 0
-            conflict_risk *= 0.5
-        trust_deficit = max(
-            0.0,
-            0.85 - trust
-        )
+            conflict_risk *= (
+                topology_confidence
+                / max(
+                    topology_threshold,
+                    1e-6
+                )
+            )
 
-        ttc_horizon = (
-            4.0
-            + 4.0 * trust_deficit
-        )
+        elif topology_confidence > topology_threshold:
 
-        yield_threshold = max(
-            0.30,
-            0.50 - 0.20 * trust_deficit
-        )
-
-        avoid_threshold = max(
-            0.50,
-            0.75 - 0.25 * trust_deficit
-        )
-
-
+            conflict_risk = min(
+                1.0,
+                conflict_risk * 1.25
+            )
         force_degraded = (
             self.runtime_state == "UNSAFE"
         )
-        if (
-            np.isfinite(
-                self.minimum_ttc
+        safety_margin = (
+            trust_results
+            .get(
+                "safety_margin"
             )
+        )
+        plausibility = (
+            trust_results.get(
+                "plausibility"
+            )
+        )
+        if (
+            plausibility
+            and plausibility.flag
+        ):
+            conflict_risk = max(
+                conflict_risk,
+                0.25
+            )
+        ttc_intervention = False
+
+        if (
+            np.isfinite(effective_ttc)
             and
-            self.minimum_ttc < ttc_horizon
+            effective_ttc < ttc_horizon
         ):
 
             if conflict_count >= 2:
 
-                self.decision_action = (
-                    "YIELD"
-                )
+                self.decision_action = "YIELD"
+                ttc_intervention = True
 
             elif conflict_count == 1:
 
+                self.decision_action = "AVOID_LEFT"
+                ttc_intervention = True
+
+        if not ttc_intervention:
+
+            if force_degraded:
+
                 self.decision_action = (
-                    "AVOID_LEFT"
+                    "DEGRADED_MODE"
                 )
 
-            return
-        if force_degraded:
+            elif conflict_count >= 2:
 
-            self.decision_action = (
-                "DEGRADED_MODE"
-            )
+                self.decision_action = "YIELD"
 
-        elif conflict_count >= 2:
+            elif conflict_count == 1 and (
+                conflict_risk >= risk_threshold
+            ):
+                self.decision_action = "AVOID_LEFT"
 
-            self.decision_action = "YIELD"
+            elif (
+                conflict_count >= 2
+                or
+                intersection_risk >= risk_threshold
+            ):
+                self.decision_action = "YIELD"
 
-        elif conflict_risk >= avoid_threshold:
+            else:
 
-            self.decision_action = "AVOID_LEFT"
-
-        elif (
-            conflict_risk >= yield_threshold
-            or
-            intersection_risk >= yield_threshold
-        ):
-
-            self.decision_action = "YIELD"
-
-        else:
-
-            self.decision_action = "PROCEED"
+                self.decision_action = "PROCEED"
 
         self.warning_level = (
             "EMERGENCY"
@@ -1997,11 +2440,19 @@ class MVPViewer(FigureCanvasQTAgg):
             != "PROCEED"
         )
 
-        if conflict_risk > 0:
+        if (
+            conflict_count > 0
+            and conflict_risk >= risk_threshold
+        ):
+
             self.scenario_type = (
                 "COLLISION_AVOIDANCE"
             )
-        elif intersection_risk > 0:
+
+        elif (
+            intersection_risk
+            >= risk_threshold
+        ):
             self.scenario_type = (
                 "INTERSECTION_BLOCKAGE"
             )
@@ -2019,7 +2470,7 @@ class MVPViewer(FigureCanvasQTAgg):
         )
 
         self.near_miss = (
-            self.minimum_ttc < 1.0
+            self.minimum_ttc < (FAIL_TTC_SEC* 0.5)
             and not self.alert_collision
         )
 
@@ -2031,7 +2482,7 @@ class MVPViewer(FigureCanvasQTAgg):
         self.failed_test = (
             self.alert_collision
             or (
-                self.minimum_ttc < 2.0
+                effective_ttc  < FAIL_TTC_SEC
                 and not intervention
             )
         )
@@ -2099,6 +2550,25 @@ class MVPViewer(FigureCanvasQTAgg):
                 if maneuver_conf is not None
                 else None
             ),
+            "topology_label":
+            (
+                getattr(
+                    self,
+                    "display_label",
+                    None
+                )
+            ),
+
+            "topology_confidence":
+            (
+                getattr(
+                    self,
+                    "topology_info",
+                    {}
+                ) or {}
+            ).get(
+                "confidence"
+            ),       
         }
 
 
@@ -2476,6 +2946,32 @@ class MVPViewer(FigureCanvasQTAgg):
         self.agent_start_x = self.agent_x
         self.agent_start_y = self.agent_y
 
+        path = DEFAULT_PATHS.get(
+            self.current_path_name
+        )
+
+        if (
+            path is not None
+            and len(path.waypoints) >= 2
+        ):
+            nearest_idx = min(
+                range(len(path.waypoints)),
+                key=lambda i:
+                (
+                    (path.waypoints[i][0] - self.agent_x) ** 2
+                    +
+                    (path.waypoints[i][1] - self.agent_y) ** 2
+                )
+            )
+
+            self.current_waypoint_idx = max(
+                1,
+                nearest_idx,
+            )
+
+        self.active_track_id = None
+        self._last_lookup_key = None
+
     def draw_active_trajectory(self):
 
         if self.trajectory_artist:
@@ -2579,8 +3075,27 @@ class MVPViewer(FigureCanvasQTAgg):
         )
 
         while remaining > 0:
-
             if self.current_waypoint_idx >= len(path.waypoints):
+                self.current_waypoint_idx = 1
+                self.agent_x = (
+                    path.waypoints[0][0]
+                )
+                self.agent_y = (
+                    path.waypoints[0][1]
+                )
+                self.active_track_id = None
+                self._last_lookup_key = None
+                frame = tracks[self.frame_idx]
+                replacement = None
+                best_ttc = np.inf
+                for obj in frame["objects"]:
+
+                    ttc = self.compute_ttc(obj)
+
+                    if ttc < best_ttc:
+                        best_ttc = ttc
+                        replacement = obj["track_id"]
+                self.active_track_id = replacement
                 return
 
             tx, ty = self.get_offset_target(
@@ -2877,7 +3392,7 @@ class MVPViewer(FigureCanvasQTAgg):
                 cy - self.agent_y
             )
 
-            if d < 30:
+            if d < 30: ### COLLISION DISTANCE in PX
                 self.alert_collision = True
                 break
 
@@ -3441,6 +3956,109 @@ class MainWindow(QMainWindow):
                 self.viewer.frame_idx
             )
 
+    def choose_active_forklift(self):
+
+        frame = tracks[
+            self.viewer.frame_idx
+        ]
+
+        path = DEFAULT_PATHS.get(
+            self.viewer.current_path_name
+        )
+
+        if (
+            path is None
+            or self.viewer.current_waypoint_idx
+            >= len(path.waypoints)
+        ):
+            return None
+
+        tx, ty = path.waypoints[
+            self.viewer.current_waypoint_idx
+        ]
+
+        heading = np.array([
+            tx - self.viewer.agent_x,
+            ty - self.viewer.agent_y
+        ])
+
+        norm = np.linalg.norm(
+            heading
+        )
+
+        if norm < 1e-6:
+            return None
+
+        heading /= norm
+
+        best_track = None
+        best_metric = np.inf
+
+        for obj in frame["objects"]:
+
+            tid = obj["track_id"]
+
+            cx, cy = get_occ_center(
+                obj
+            )
+
+            rel = np.array([
+                cx - self.viewer.agent_x,
+                cy - self.viewer.agent_y
+            ])
+
+            forward = np.dot(
+                rel,
+                heading
+            )
+
+            if forward <= 0:
+                continue
+
+            dist = np.linalg.norm(
+                rel
+            )
+            ttc = self.viewer.compute_ttc(obj)
+
+            label = (
+                prediction_lookup
+                .get(
+                    int(
+                        frame["timestamp"]
+                    ),
+                    {}
+                )
+                .get(
+                    tid,
+                    {}
+                )
+                .get(
+                    "topology",
+                    {}
+                )
+            )
+
+            topology_conf = float(
+                label.get(
+                    "confidence",
+                    0.0
+                )
+            )
+
+            metric = (
+                ttc
+                if np.isfinite(ttc)
+                else np.inf
+            )
+
+            if topology_conf > 0.5:
+                metric *= 0.75
+
+            if metric < best_metric:
+                best_metric = metric
+                best_track = tid
+
+        return best_track
 
     def scenario_description(
         self,
@@ -3589,18 +4207,12 @@ class MainWindow(QMainWindow):
 
     def next_frame(self):
 
-        current_track = (
-            self.viewer.active_track_id
-        )
         i = (
             self.viewer.frame_idx + 1
         ) % NUM_FRAMES
+
         self.viewer.update_frame(i)
 
-        self.viewer.active_track_id = (
-            current_track
-        )
-        self.viewer.lookup_predictions()
         self.refresh_object_combo()
 
         self.slider.blockSignals(True)
@@ -3643,15 +4255,14 @@ class MainWindow(QMainWindow):
         self,
         trust
     ):
-
         if trust < 0.25:
             return "Unsafe operation"
 
         if trust < 0.50:
-            return "Low confidence"
+            return "Warning state"
 
-        if trust < 0.80:
-            return "Restricted autonomy"
+        if trust < 0.70:
+            return "Degraded operation"
 
         return "Nominal operation"
 
@@ -3955,15 +4566,17 @@ class MainWindow(QMainWindow):
         self.update_colored_metric(
             self.label_ttc,
             v.minimum_ttc,
-            2,
-            4
+            FAIL_TTC_SEC,
+            2.0 * FAIL_TTC_SEC
         )
 
-        if v.current_trust < 0.4:
+        levels = trust_levels()
+
+        if v.current_trust < TRUST_UNSAFE:
 
             color = "#ff4444"
 
-        elif v.current_trust < 0.7:
+        elif v.current_trust < levels["normal"]:
 
             color = "#ffb300"
 
@@ -3978,18 +4591,101 @@ class MainWindow(QMainWindow):
             """
         )
 
+    def active_track_passed(self):
+
+        tid = self.viewer.active_track_id
+
+        if tid is None:
+            return True
+
+        frame = tracks[
+            self.viewer.frame_idx
+        ]
+
+        obj = next(
+            (
+                o
+                for o in frame["objects"]
+                if o["track_id"] == tid
+            ),
+            None,
+        )
+
+        if obj is None:
+            return True
+
+        path = DEFAULT_PATHS.get(
+            self.viewer.current_path_name
+        )
+
+        if (
+            path is None or
+            self.viewer.current_waypoint_idx
+            >= len(path.waypoints)
+        ):
+            return False
+
+        tx, ty = path.waypoints[
+            self.viewer.current_waypoint_idx
+        ]
+
+        heading = np.array([
+            tx - self.viewer.agent_x,
+            ty - self.viewer.agent_y
+        ])
+
+        norm = np.linalg.norm(
+            heading
+        )
+
+        if norm < 1e-6:
+            return False
+
+        heading /= norm
+
+        cx, cy = get_occ_center(obj)
+
+        rel = np.array([
+            cx - self.viewer.agent_x,
+            cy - self.viewer.agent_y
+        ])
+
+        return (
+            np.dot(rel, heading)
+            <= 0
+        )
+
     def refresh_object_combo(self):
 
         visible = tuple(
-            sorted(set(self.viewer.track_ids_current))
+            sorted(
+                set(
+                    self.viewer.track_ids_current
+                )
+            )
         )
 
-        if visible == self._last_visible_tracks:
-            return
+        selected = self.viewer.active_track_id
+
+        if self.active_track_passed():
+
+            replacement = (
+                self.choose_active_forklift()
+            )
+
+            if replacement is not None:
+
+                selected = replacement
+
+                self.viewer.active_track_id = (
+                    replacement
+                )
+
+                self.viewer._last_lookup_key = None
+
+                self.viewer.lookup_predictions()
 
         self._last_visible_tracks = visible
-
-        selected = self.viewer.active_track_id
 
         self.object_select.blockSignals(True)
 
@@ -4000,8 +4696,10 @@ class MainWindow(QMainWindow):
 
         if selected in visible:
 
-            idx = self.object_select.findText(
-                str(selected)
+            idx = (
+                self.object_select.findText(
+                    str(selected)
+                )
             )
 
             if idx >= 0:
@@ -4010,6 +4708,7 @@ class MainWindow(QMainWindow):
         elif visible:
 
             self.viewer.active_track_id = visible[0]
+
             self.object_select.setCurrentIndex(0)
 
         self.object_select.blockSignals(False)
@@ -4059,7 +4758,7 @@ class MainWindow(QMainWindow):
             text.replace("x", "")
         )
 
-        self.viewer.operator_speed_factor = factor
+        self.viewer.agent_speed_factor = factor
 
 
 # ==========================================================
