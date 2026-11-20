@@ -1,376 +1,384 @@
 #!/usr/bin/env python3
 
-import gzip
-import json
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import pandas as pd
+
+CSV = "./scenario_data/scenario_summary.csv"
+
+OUTDIR = Path("whatif")
+OUTDIR.mkdir(exist_ok=True)
 
 
-def load_instances(path):
+df = pd.read_csv(
+    CSV,
+    encoding="utf-8-sig"
+)
 
-    data = json.load(
-        gzip.open(path, "rt")
+
+# --------------------------------------------------
+# Normalize exported fields
+# --------------------------------------------------
+
+df["expected_intervention"] = (
+    df["expected_action"]
+    .astype(str)
+    .eq("INTERVENE")
+)
+
+df["actual_intervention"] = (
+    df["actual_action"]
+    .isin(
+        [
+            "YIELD",
+            "AVOID_LEFT",
+            "WAIT_BEFORE_INTERSECTION",
+            "DEGRADED_MODE",
+        ]
     )
+)
 
-    rows = []
-
-    for inst in data.get(
-        "instances",
-        []
-    ):
-
-        s = (
-            inst
-            .get(
-                "precomputed_behavior",
-                {}
-            )
-            .get(
-                "summary",
-                {}
-            )
+for col in [
+    "trigger_ttc",
+    "trigger_trust",
+    "max_risk",
+    "route_prob",
+    "route_uncertainty",
+    "maneuver_confidence",
+    "topology_confidence",
+    "timing_margin_frames",
+    "required_ttc",
+    "required_risk",
+    "baseline_min_ttc",
+]:
+    if col in df.columns:
+        df[col] = pd.to_numeric(
+            df[col],
+            errors="coerce"
         )
 
-        t = (
-            s.get("trigger")
-            or {}
-        )
 
-        b = (
-            s.get("baseline")
-            or {}
-        )
+# --------------------------------------------------
+# Generic evaluator
+# --------------------------------------------------
 
-        rows.append({
+def classification_stats(mask):
 
-            "scenario":
-                path.stem,
+    predicted = mask.fillna(False)
 
-            "instance_id":
-                inst.get("id"),
+    expected = df["expected_intervention"]
 
-            "trigger_ttc":
-                t.get("ttc"),
+    tp = (predicted & expected).sum()
+    fp = (predicted & ~expected).sum()
+    fn = (~predicted & expected).sum()
+    tn = (~predicted & ~expected).sum()
 
-            "trigger_trust":
-                t.get("trust"),
-
-            "trigger_action":
-                t.get("action"),
-
-            "outcome":
-                s.get("outcome"),
-
-            "result":
-                s.get("result"),
-
-            "expected_action":
-                s.get(
-                    "expected_action"
-                ),
-
-            "baseline_min_ttc":
-                b.get(
-                    "min_ttc"
-                ),
-
-            "baseline_collision":
-                b.get(
-                    "collision"
-                ),
-
-            "safety_critical":
-                (
-                    s.get(
-                        "expected_action"
-                    )
-                    != "PROCEED"
-                ),
-        })
-
-    return rows
-
-
-def evaluate_ttc(
-    df,
-    threshold
-):
-
-    pass_count = 0
-    fail_count = 0
-    false_positive = 0
-
-    for row in df.itertuples():
-
-        critical = bool(
-            row.safety_critical
-        )
-
-        ttc = row.trigger_ttc
-
-        action = (
-            row.trigger_action
-            or "PROCEED"
-        )
-
-        if critical:
-
-            passed = (
-                pd.notna(ttc)
-                and ttc >= threshold
-            )
-
-        else:
-
-            passed = (
-                action
-                == "PROCEED"
-            )
-
-            if (
-                action
-                != "PROCEED"
-            ):
-                false_positive += 1
-
-        if passed:
-            pass_count += 1
-        else:
-            fail_count += 1
-
-    total = (
-        pass_count
-        + fail_count
-    )
+    total = tp + fp + fn + tn
 
     return {
-        "threshold":
-            threshold,
-
         "pass_rate":
-            pass_count / total,
-
-        "fail_rate":
-            fail_count / total,
+            (tp + tn) / total,
 
         "false_positive_rate":
-            false_positive
-            / total,
+            fp / total,
+
+        "miss_rate":
+            fn / total,
+
+        "intervention_rate":
+            predicted.mean(),
+
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "tn": tn,
     }
 
 
-def evaluate_trust(
-    df,
-    threshold
+# --------------------------------------------------
+# Sweep helper
+# --------------------------------------------------
+
+def sweep(
+    column,
+    thresholds,
+    comparator,
 ):
 
-    triggered = (
-        df.trigger_trust
-        < threshold
-    )
+    result = []
 
-    return {
-        "threshold":
-            threshold,
+    if column not in df.columns:
+        return pd.DataFrame()
 
-        "trigger_rate":
-            triggered.mean(),
-    }
+    values = df[column]
 
+    for threshold in thresholds:
 
-def sweep_ttc(df):
-
-    rows = []
-
-    for th in (
-        0.5,
-        1.0,
-        1.5,
-        2.0,
-        2.5,
-        3.0,
-        4.0,
-        5.0,
-    ):
-
-        rows.append(
-            evaluate_ttc(
-                df,
-                th
-            )
+        mask = comparator(
+            values,
+            threshold
         )
 
-    return pd.DataFrame(
-        rows
+        row = classification_stats(mask)
+
+        row["threshold"] = threshold
+
+        result.append(row)
+
+    return pd.DataFrame(result)
+
+
+# --------------------------------------------------
+# Parameter sweeps
+# --------------------------------------------------
+
+sweeps = {
+    "trigger_ttc":
+        (
+            np.arange(
+                0.5,
+                5.1,
+                0.25
+            ),
+            lambda x, t: x <= t
+        ),
+
+    "trigger_trust":
+        (
+            np.arange(
+                0.30,
+                1.01,
+                0.05
+            ),
+            lambda x, t: x <= t
+        ),
+
+    "max_risk":
+        (
+            np.arange(
+                0.05,
+                1.01,
+                0.05
+            ),
+            lambda x, t: x >= t
+        ),
+
+    "route_prob":
+        (
+            np.arange(
+                0.30,
+                1.01,
+                0.05
+            ),
+            lambda x, t: x >= t
+        ),
+
+    "route_uncertainty":
+        (
+            np.arange(
+                0.05,
+                1.01,
+                0.05
+            ),
+            lambda x, t: x <= t
+        ),
+
+    "maneuver_confidence":
+        (
+            np.arange(
+                0.30,
+                1.01,
+                0.05
+            ),
+            lambda x, t: x >= t
+        ),
+
+    "topology_confidence":
+        (
+            np.arange(
+                0.30,
+                1.01,
+                0.05
+            ),
+            lambda x, t: x >= t
+        ),
+}
+
+
+# --------------------------------------------------
+# Run sweeps
+# --------------------------------------------------
+
+for parameter, config in sweeps.items():
+
+    thresholds, comparator = config
+
+    frame = sweep(
+        parameter,
+        thresholds,
+        comparator
     )
 
-
-def sweep_trust(df):
-
-    rows = []
-
-    for th in (
-        0.2,
-        0.3,
-        0.4,
-        0.5,
-        0.6,
-        0.7,
-        0.8,
-        0.9,
-    ):
-
-        rows.append(
-            evaluate_trust(
-                df,
-                th
-            )
+    if frame.empty:
+        print(
+            f"Skipping {parameter} "
+            "(not exported)"
         )
+        continue
 
-    return pd.DataFrame(
-        rows
+    frame.to_csv(
+        OUTDIR /
+        f"{parameter}_sweep.csv",
+        index=False
     )
 
+    plt.figure(figsize=(8, 4))
 
-def plot_sweep(
-    frame,
-    x,
-    y,
-    title,
-    path,
-):
-
-    plt.figure(
-        figsize=(7,4)
+    plt.plot(
+        frame["threshold"],
+        frame["pass_rate"],
+        label="Pass rate",
     )
 
     plt.plot(
-        frame[x],
-        frame[y],
-        marker="o"
+        frame["threshold"],
+        frame["miss_rate"],
+        label="Miss rate",
+    )
+
+    plt.plot(
+        frame["threshold"],
+        frame["false_positive_rate"],
+        label="False positive",
     )
 
     plt.grid(True)
 
-    plt.title(title)
+    plt.legend()
+
+    plt.title(
+        f"What-if Sweep: {parameter}"
+    )
 
     plt.tight_layout()
 
-    plt.savefig(path)
+    plt.savefig(
+        OUTDIR /
+        f"{parameter}_sweep.png"
+    )
 
     plt.close()
 
 
-def main():
+# --------------------------------------------------
+# Scenario-specific analysis
+# --------------------------------------------------
 
-    files = (
-        sorted(
-            Path(
-                "./scenario_data"
-            ).glob(
-                "scenario_*_instances.json.gz"
-            )
-        )
-        or
-        sorted(
-            Path(".").glob(
-                "scenario_*_instances.json.gz"
-            )
-        )
-    )
+for scenario in sorted(
+    df["required_scenario"]
+    .dropna()
+    .unique()
+):
 
-    if not files:
-        raise FileNotFoundError(
-            "No scenario files"
-        )
+    subset = df[
+        df["required_scenario"]
+        == scenario
+    ]
 
-    rows = []
+    summary = {
 
-    for f in files:
-        rows.extend(
-            load_instances(f)
-        )
+        "samples":
+            len(subset),
 
-    df = pd.DataFrame(rows)
-    out = (
-        files[0].parent
-        /
-        "scenario_analysis"
-    )
+        "pass_rate":
+            (
+                subset["result"]
+                == "PASS"
+            ).mean(),
 
-    out.mkdir(
-        exist_ok=True
-    )
+        "late_rate":
+            (
+                subset["outcome"]
+                == "LATE_ACTION"
+            ).mean(),
 
-    critical = (
-        df.safety_critical
-        .value_counts()
-    )
+        "miss_rate":
+            (
+                subset["outcome"]
+                == "MISSED_ACTION"
+            ).mean(),
 
-    critical.to_csv(
-        out /
-        "safety_critical_summary.csv"
-    )    
+        "false_positive_rate":
+            (
+                subset["outcome"]
+                == "FALSE_POSITIVE"
+            ).mean(),
 
+        "avg_required_ttc":
+            subset["required_ttc"].mean(),
 
+        "avg_route_prob":
+            subset["route_prob"].mean(),
 
-    ttc = sweep_ttc(df)
+        "avg_route_uncertainty":
+            subset["route_uncertainty"].mean(),
 
-    trust = sweep_trust(df)
+        "avg_maneuver_conf":
+            subset["maneuver_confidence"].mean(),
 
-    ttc.to_csv(
-        out /
-        "ttc_threshold_sweep.csv",
-        index=False
-    )
+        "avg_topology_conf":
+            subset["topology_confidence"].mean(),
+    }
 
-    trust.to_csv(
-        out /
-        "trust_threshold_sweep.csv",
-        index=False
-    )
-
-    plot_sweep(
-        ttc,
-        "threshold",
-        "pass_rate",
-        "Pass rate vs TTC threshold",
-        out /
-        "pass_rate_vs_ttc.png",
-    )
-
-    plot_sweep(
-        ttc,
-        "threshold",
-        "fail_rate",
-        "Fail rate vs TTC threshold",
-        out /
-        "fail_rate_vs_ttc.png",
-    )
-
-    plot_sweep(
-        trust,
-        "threshold",
-        "trigger_rate",
-        "Trigger rate vs trust threshold",
-        out /
-        "trust_threshold_effect.png",
-    )
-    plot_sweep(
-        ttc,
-        "threshold",
-        "false_positive_rate",
-        "False positive rate vs TTC threshold",
-        out /
-        "false_positive_vs_ttc.png",
-    )
-
-    print(
-        f"Analysis written to {out}"
+    pd.DataFrame([summary]).to_csv(
+        OUTDIR /
+        f"{scenario}_summary.csv",
+        index=False,
     )
 
 
-if __name__ == "__main__":
-    main()
+# --------------------------------------------------
+# Timing analysis
+# --------------------------------------------------
+
+timing = df[
+    df["timing_margin_frames"]
+    .notna()
+]
+
+if len(timing):
+
+    timing[
+        "timing_margin_frames"
+    ].hist(
+        bins=40
+    )
+
+    plt.title(
+        "Trigger timing margin"
+    )
+
+    plt.xlabel(
+        "Frames (positive = early)"
+    )
+
+    plt.ylabel(
+        "Count"
+    )
+
+    plt.tight_layout()
+
+    plt.savefig(
+        OUTDIR /
+        "timing_margin_histogram.png"
+    )
+
+    plt.close()
+
+
+print(
+    "What-if analysis written to",
+    OUTDIR,
+)

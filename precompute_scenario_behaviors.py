@@ -302,7 +302,6 @@ def install_instance(mvp, instance):
 
     mvp.tracks = FRAME_CACHE[canonical]
     mvp.NUM_FRAMES = len(mvp.tracks)
-
     if canonical not in PRED_CACHE:
 
         PRED_CACHE[canonical] = {
@@ -499,9 +498,7 @@ class ExistingMvpReplay:
             self.viewer.compute_scene_info(
                 frame
             )
-
             self.viewer.lookup_predictions()
-
             self.viewer.evaluate_scene_risk(
                 frame
             )

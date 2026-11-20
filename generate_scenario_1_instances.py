@@ -14,7 +14,6 @@ from shapely.geometry import LineString, Point, Polygon
 
 from scenario_config import path
 
-
 REPO_ROOT = Path(__file__).resolve().parent
 OUTPUT = path("scenario_1_instances_json")
 METRICS = path("scenario_1_metrics")
@@ -480,7 +479,7 @@ def write_classification_report(instances):
         "",
         "A fail-safe test requires the configured supervisor uncertainty threshold (0.70) or a recorded OOD flag. No selected moving-forklift window reaches that threshold. For clearance examples, the AMR must first leave the intersection and then stop or reassess if the uncertainty remains high.",
     ])
-    CLASSIFICATION_REPORT.write_text("\n".join(lines) + "\n")
+    CLASSIFICATION_REPORT.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def write_window_summary(candidates, routes_by_window, instances):
@@ -524,7 +523,7 @@ def write_window_summary(candidates, routes_by_window, instances):
         "- Every selected route stays within the robot operating area and crosses the intersection. Forward and reverse directions are treated as different route variants.",
         "- This catalogue describes intended test coverage. Reported decision outcomes should be derived from the MVP evidence log after replaying the cases, especially because all nearby forklifts now participate in the online safety decision.",
     ])
-    WINDOW_SUMMARY_REPORT.write_text("\n".join(lines) + "\n")
+    WINDOW_SUMMARY_REPORT.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def build_instance(window_index, path_index, candidate, frames, predictions, intersection, operating_area,
@@ -772,7 +771,7 @@ def main():
         "This batch contains moving-forklift entry-control examples with AMR through-routes across the intersection. The current recordings contain no loading or stationary detections within the selected intersection, so those claims are intentionally excluded. "
         "Export the MVP evidence logs before calculating recall, false positives, or any Vinnova-facing performance metric.\n".format(
             ", ".join("{}={}".format(key, value) for key, value in sorted(coverage.items()))
-        )
+        ), encoding="utf-8"
     )
     print("Using approved reference paths: {}".format(
         ", ".join(route["name"] for route in reference_routes)

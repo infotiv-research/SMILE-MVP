@@ -3696,6 +3696,11 @@ class MainWindow(QMainWindow):
         self.play_btn = QPushButton("▶ Play")
         self.reset_btn = QPushButton("🔄 Reset")
         self.load_btn = QPushButton("📂 Load")
+        self.load_scenario2_btn = QPushButton(
+            "Load Scenario 2 Test"
+        )
+        self.window_select = QComboBox()        
+        self.scenario2_windows = {}
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.new_path_btn = QPushButton("New Path")
         self.save_path_btn = QPushButton("Save Paths")
@@ -3828,6 +3833,9 @@ class MainWindow(QMainWindow):
         ctrl.addWidget(self.save_path_btn)
         ctrl.addWidget(self.load_path_btn)
         ctrl.addWidget(self.edit_path_btn)
+        ctrl.addWidget(self.load_scenario2_btn)
+        ctrl.addWidget(QLabel("Scenario Window"))
+        ctrl.addWidget(self.window_select)
 
         ctrl.addWidget(QLabel("AMR Speed"))
         ctrl.addWidget(self.speed_select)
@@ -3845,32 +3853,19 @@ class MainWindow(QMainWindow):
 
         ctrl.addSpacing(10)
         ctrl.addWidget(self.label_result_banner)
-
         ctrl.addWidget(self.label_state)
-
         ctrl.addWidget(self.label_scenario)
-
         ctrl.addWidget(self.label_risk)
-
         ctrl.addSpacing(5)
-
         ctrl.addWidget(self.label_action)
-
         ctrl.addWidget(self.label_warning)
-
         ctrl.addSpacing(5)
-
         ctrl.addWidget(self.label_ttc)
-
         ctrl.addSpacing(5)
-
         ctrl.addWidget(self.label_trust)
         ctrl.addWidget(self.label_trust_reason)
-
         ctrl.addSpacing(10)
-
         ctrl.addWidget(QLabel("Assessment"))
-
         ctrl.addWidget(
             self.label_explanation
         )
@@ -3929,7 +3924,85 @@ class MainWindow(QMainWindow):
         self.new_path_btn.clicked.connect(self.create_new_path)
         self.save_path_btn.clicked.connect(self.save_path_library)
         self.load_path_btn.clicked.connect(self.load_path_library)
+        self.load_scenario2_btn.clicked.connect(
+            self.load_scenario2_test_pack
+        )
+        self.window_select.currentTextChanged.connect(
+            self.apply_scenario2_window
+        )        
         self._last_visible_tracks = None
+
+    def apply_scenario2_window(self, name):
+        w = self.scenario2_windows[name]
+
+        self.viewer.active_track_id = (
+            w["focus_track_id"]
+        )
+
+        self.viewer._last_lookup_key = None
+
+        frame_idx = (
+            w["window_start_frame"]
+        )
+
+        self.slider.setValue(frame_idx)
+
+        self.viewer.update_frame(
+            frame_idx
+        )
+
+        self.refresh_info_panel()
+
+    def load_scenario2_test_pack(self):
+        with open(
+            "./scenario_data/robot_reference_paths_scenario_2.json",
+            "r"
+        ) as f:
+            paths = json.load(f)
+
+        DEFAULT_PATHS.clear()
+
+        for name, p in paths.items():
+            path = RobotPath(name)
+            path.speed = p.get("speed", 2.0)
+            path.start_frame = p.get(
+                "start_frame", 0
+            )
+            path.end_frame = p.get(
+                "end_frame", None
+            )
+            path.associated_track = p.get(
+                "associated_track", None
+            )
+            path.waypoints = [
+                tuple(x)
+                for x in p.get(
+                    "waypoints", []
+                )
+            ]
+            DEFAULT_PATHS[name] = path
+
+        with open(
+            "./scenario_data/scenario_2_candidate_windows.json",
+            "r"
+        ) as f:
+            windows = json.load(f)
+
+        self.scenario2_windows = {
+            w["id"]: w
+            for w in windows["windows"]
+        }
+
+        self.path_select.clear()
+        self.path_select.addItems(
+            DEFAULT_PATHS.keys()
+        )
+
+        self.window_select.clear()
+        self.window_select.addItems(
+            self.scenario2_windows.keys()
+        )
+
 
     def save_path_library(self):
         save_paths()

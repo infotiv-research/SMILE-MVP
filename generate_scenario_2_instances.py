@@ -417,7 +417,7 @@ def main():
         labels = ", ".join(item["coverage"] for item in group)
         lines.append("| {} | {} |".format(candidate["id"], labels))
     lines.extend(["", "These variants exercise the existing online TTC/trajectory safety layer. Loading/stationary entries are recorded maneuver contexts; a dedicated Scenario 2 maneuver policy can be added before measuring rule-specific pass/fail results."])
-    REPORT.write_text("\n".join(lines) + "\n")
+    REPORT.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("Wrote {} with {} windows × {} paths".format(OUTPUT.relative_to(ROOT), len(candidates), len(paths)))
 
 
