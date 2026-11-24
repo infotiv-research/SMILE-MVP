@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import argparse
-import json
-import math
-import os
-import pickle
-import sys
+import argparse, json, math, os, pickle, sys
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -14,187 +10,94 @@ import cv2
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.signal import savgol_filter
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
-from scipy.signal import savgol_filter
-from collections import deque
 
 # ==========================================================
-# BEV BACKGROUND SUPPORT
+# CONFIG + BEV BACKGROUND
 # ==========================================================
-
 CONFIG_FILE = "mvp-config.json"
-
-with open(CONFIG_FILE, "r") as f:
+with open(CONFIG_FILE) as f:
     CFG = json.load(f)
 
-DATA_ROOT = Path(
-    CFG["paths"]["dataset_root"]
-)
+DATA_ROOT = Path(CFG["paths"]["dataset_root"])
 DATA_PATH = str(DATA_ROOT / CFG["paths"]["save_path"])
 EXTRA_PATHS = CFG["extra_paths"]
-
-OCCUPANCY_PROJECTION = str(
-    DATA_ROOT /
-    EXTRA_PATHS["occupancy_projection"]
-)
-
-BEV_FOLDER = str(
-    DATA_ROOT /
-    EXTRA_PATHS["mask_folder"]
-)
+OCCUPANCY_PROJECTION = str(DATA_ROOT / EXTRA_PATHS["occupancy_projection"])
+BEV_FOLDER = str(DATA_ROOT / EXTRA_PATHS["mask_folder"])
 
 EXPORT_FAST_MODE = True
 
 bev_lookup = {}
-
 if os.path.isdir(BEV_FOLDER):
     _bev_files = os.listdir(BEV_FOLDER)
 else:
     _bev_files = []
     print(f"[WARN] BEV folder not found: {BEV_FOLDER}")
-
 for f in _bev_files:
-    if not f.lower().endswith(".jpg"):
-        continue
+    if f.lower().endswith(".jpg"):
+        try:
+            bev_lookup[int(Path(f).stem)] = f
+        except ValueError:
+            pass
 
-    try:
-        ts = int(Path(f).stem)
-        bev_lookup[ts] = f
-    except ValueError:
-        pass
-
-
-# --------------------- I/O helpers ---------------------
-
-def route_family(route):
-    a, b = route
-
-    #
-    # collapse direction
-    #
-    if a > b:
-        a, b = b, a
-
-    return (a, b)
-
-
+# --------------------- projection helpers ---------------------
 def load_occupancy_projection():
     with open(OCCUPANCY_PROJECTION, "rb") as f:
-        occ = pickle.load(f)
-
-    P = np.asarray(occ["P"], dtype=np.float64)
-    return P
-
+        return np.asarray(pickle.load(f)["P"], dtype=np.float64)
 
 P_OCC = None
 
 def get_projection():
-
     global P_OCC
-
-    if P_OCC is not None:
-        return P_OCC
-
-    try:
-
-        P_OCC = load_occupancy_projection()
-
-    except Exception:
-
-        P_OCC = None
-
+    if P_OCC is None:
+        try:
+            P_OCC = load_occupancy_projection()
+        except Exception:
+            P_OCC = None
     return P_OCC
 
-
 def world_to_occupancy(wx, wy):
-    P_OCC = get_projection()
-
-    if P_OCC is None:
+    P = get_projection()
+    if P is None:
         return wx, wy
-
-    X = np.array([[wx], [wy], [0.0], [1.0]], dtype=np.float64)
-
-    uvw = P_OCC @ X
-    uvw = uvw.ravel()
-
-    u = uvw[0] / uvw[2]
-    v = uvw[1] / uvw[2]
-
-    return float(u), float(v)
+    uvw = (P @ np.array([[wx], [wy], [0.0], [1.0]])).ravel()
+    return float(uvw[0] / uvw[2]), float(uvw[1] / uvw[2])
 
 def world_poly_to_occ(poly):
-    out = []
+    return np.asarray([world_to_occupancy(x, y) for x, y in np.asarray(poly)], dtype=float)
 
-    for x, y in np.asarray(poly):
-        u, v = world_to_occupancy(x, y)
-        out.append([u, v])
-
-    return np.asarray(out, dtype=float)
-
-
-# ==========================================================
-# GRID SMOOTHING
-# ==========================================================
-
+# --------------------- grid smoothing ---------------------
 TRAJ_GRID = 0.25  # meters
 
-
-def smooth_trajectory(
-    arr,
-    grid=TRAJ_GRID,
-):
-    arr = np.asarray(
-        arr,
-        dtype=float,
-    )
-
+def smooth_trajectory(arr, grid=TRAJ_GRID):
+    arr = np.asarray(arr, dtype=float)
     if len(arr) < 7:
         return arr
-
     win = min(11, len(arr))
-    win = win - (1 - win % 2)
-
-    xs = savgol_filter(
-        arr[:, 0],
-        win,
-        2,
-    )
-
-    ys = savgol_filter(
-        arr[:, 1],
-        win,
-        2,
-    )
-
-    sm = np.column_stack([xs, ys])
-
-    sm = np.round(sm / grid) * grid
-
+    win -= (1 - win % 2)
+    xs = savgol_filter(arr[:, 0], win, 2)
+    ys = savgol_filter(arr[:, 1], win, 2)
+    sm = np.round(np.column_stack([xs, ys]) / grid) * grid
     keep = [0]
-
     for i in range(1, len(sm)):
         if not np.allclose(sm[i], sm[keep[-1]]):
             keep.append(i)
-
     return sm[keep]
 
-
+# --------------------- model storage ---------------------
 def ensure_dir(d: str):
     os.makedirs(d, exist_ok=True)
-
 
 def models_dir() -> str:
     d = os.path.join(os.getcwd(), "models")
     ensure_dir(d)
     return d
 
-
 def timestamped_model_path() -> str:
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return os.path.join(models_dir(), f"model_{ts}.npz")
-
+    return os.path.join(models_dir(), f"model_{datetime.now().strftime('%Y%m%d_%H%M%S')}.npz")
 
 def list_saved_models() -> List[str]:
     d = models_dir()
@@ -202,12 +105,8 @@ def list_saved_models() -> List[str]:
     files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     return files
 
-
 def get_model_entry_count(path):
-    """
-    Return number of entries stored in a saved model.
-    Works for both old and new model files.
-    """
+    """Number of entries stored in a saved model (old and new file formats)."""
     try:
         with np.load(path, allow_pickle=True) as d:
             if "entry_centers" in d:
@@ -216,6 +115,17 @@ def get_model_entry_count(path):
         pass
     return None
 
+# --------------------- geometry ---------------------
+def point_in_poly(pt, poly):
+    x, y = pt[0], pt[1]
+    inside, j = False, len(poly) - 1
+    for i in range(len(poly)):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi):
+            inside = not inside
+        j = i
+    return inside
 
 def _point_to_segment_distance(pt, a, b):
     pt, a, b = map(lambda x: np.asarray(x, dtype=float), (pt, a, b))
@@ -223,16 +133,12 @@ def _point_to_segment_distance(pt, a, b):
     t = np.clip(np.dot(pt - a, ab) / (np.dot(ab, ab) + 1e-12), 0.0, 1.0)
     return float(np.linalg.norm(pt - (a + t * ab)))
 
-
 def _point_to_poly_distance(pt, poly):
     poly = np.asarray(poly, dtype=float)
     if point_in_poly(pt, poly):
         return 0.0
-    return min(
-        _point_to_segment_distance(pt, poly[i], poly[(i + 1) % len(poly)])
-        for i in range(len(poly))
-    )
-
+    return min(_point_to_segment_distance(pt, poly[i], poly[(i + 1) % len(poly)])
+               for i in range(len(poly)))
 
 def classify_topology_state(model, pos):
     """Classify by polygon containment first, boundary distance second."""
@@ -240,20 +146,14 @@ def classify_topology_state(model, pos):
         return {"zone": None, "edge": None, "distance": np.inf}
     if point_in_poly(pos, model.intersection_poly):
         return {"zone": "I", "edge": "I", "distance": 0.0}
-    containing = [
-        zid for zid, poly in model.zone_polys.items() if point_in_poly(pos, poly)
-    ]
+    containing = [z for z, poly in model.zone_polys.items() if point_in_poly(pos, poly)]
     candidates = containing or list(model.zone_polys)
-    best_zone = min(
-        candidates,
-        key=lambda zid: _point_to_poly_distance(pos, model.zone_polys[zid]),
-    )
-    best_dist = _point_to_poly_distance(pos, model.zone_polys[best_zone])
-    return {"zone": best_zone, "edge": str(best_zone), "distance": best_dist}
-
+    best = min(candidates, key=lambda z: _point_to_poly_distance(pos, model.zone_polys[z]))
+    return {"zone": best, "edge": str(best),
+            "distance": _point_to_poly_distance(pos, model.zone_polys[best])}
 
 def _assign_entry_labels(trajs, entry_centers, entry_match_radius=4.0):
-    """Return valid (tid, start_entry, end_entry, trajectory) tuples."""
+    """Valid (tid, start_entry, end_entry, trajectory) tuples."""
     labelled = []
     entry_centers = np.asarray(entry_centers, dtype=float)
     for tid, arr in trajs.items():
@@ -263,47 +163,22 @@ def _assign_entry_labels(trajs, entry_centers, entry_match_radius=4.0):
         sd = np.linalg.norm(entry_centers - arr[0], axis=1)
         ed = np.linalg.norm(entry_centers - arr[-1], axis=1)
         sidx, eidx = int(np.argmin(sd)), int(np.argmin(ed))
-        if sd[sidx] > entry_match_radius or ed[eidx] > entry_match_radius:
-            continue
-        if sidx == eidx:
+        if sd[sidx] > entry_match_radius or ed[eidx] > entry_match_radius or sidx == eidx:
             continue
         labelled.append((tid, sidx, eidx, arr))
     return labelled
-
 
 def _cluster_entry_arms(entry_centers, n_arms=3, seed=0):
     """Group nearby entry areas into physical corridor arms."""
     entry_centers = np.asarray(entry_centers, dtype=float)
     k = max(2, min(int(n_arms), len(entry_centers)))
     # Standardization prevents the long X range from hiding vertical separation.
-    z = (entry_centers - entry_centers.mean(axis=0)) / (
-        entry_centers.std(axis=0) + 1e-9
-    )
+    z = (entry_centers - entry_centers.mean(axis=0)) / (entry_centers.std(axis=0) + 1e-9)
     return KMeans(n_clusters=k, random_state=seed, n_init="auto").fit_predict(z)
-
-
-def point_in_poly(pt, poly):
-    x = pt[0]
-    y = pt[1]
-    inside = False
-    n = len(poly)
-    j = n - 1
-    for i in range(n):
-        xi, yi = poly[i]
-        xj, yj = poly[j]
-        hit = ((yi > y) != (yj > y)) and (
-            x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi
-        )
-        if hit:
-            inside = not inside
-        j = i
-    return inside
-
 
 def _ray_box_boundary_point(origin, target, poly):
     """Intersection of origin->target ray with an axis-aligned polygon boundary."""
-    origin = np.asarray(origin, dtype=float)
-    target = np.asarray(target, dtype=float)
+    origin, target = np.asarray(origin, dtype=float), np.asarray(target, dtype=float)
     d = target - origin
     xmin, xmax = np.min(poly[:, 0]), np.max(poly[:, 0])
     ymin, ymax = np.min(poly[:, 1]), np.max(poly[:, 1])
@@ -322,350 +197,82 @@ def _ray_box_boundary_point(origin, target, poly):
                 hits.append((t, np.array([x, y])))
     return min(hits, key=lambda z: z[0])[1] if hits else target
 
-
-def detect_intersection_region(
-    trajs,
-    entry_centers,
-    entry_match_radius=4.0,
-):
-    """
-    Junction = smallest area where
-    trajectories from different arms
-    become spatially close.
-
-    Returns WORLD coordinates.
-    """
-
-    labelled = _assign_entry_labels(
-        trajs,
-        entry_centers,
-        entry_match_radius,
-    )
-
-    arms = _cluster_entry_arms(
-        entry_centers,
-        n_arms=3,
-    )
-
-    eligible = []
-
-    for _, sidx, eidx, arr in labelled:
-        if arms[sidx] == arms[eidx]:
-            continue
-
-        eligible.append(arr)
-
+def detect_intersection_region(trajs, entry_centers, entry_match_radius=4.0):
+    """Junction = smallest area where cross-arm trajectories become close (WORLD coords)."""
+    labelled = _assign_entry_labels(trajs, entry_centers, entry_match_radius)
+    arms = _cluster_entry_arms(entry_centers, n_arms=3)
+    eligible = [arr for _, s, e, arr in labelled if arms[s] != arms[e]]
     if len(eligible) < 3:
         raise RuntimeError("Too few cross-arm trajectories.")
-
-    #
-    # Iteratively locate common crossing.
-    #
-    center = np.median(
-        np.vstack([resample_polyline(t, 51)[25] for t in eligible]),
-        axis=0,
-    )
-
+    # Iteratively locate the common crossing.
+    center = np.median(np.vstack([resample_polyline(t, 51)[25] for t in eligible]), axis=0)
     for _ in range(20):
-        anchors = []
-
-        for arr in eligible:
-            idx = np.argmin(
-                np.linalg.norm(
-                    arr - center,
-                    axis=1,
-                )
-            )
-
-            anchors.append(arr[idx])
-
-        anchors = np.asarray(anchors)
-
-        new_center = np.median(
-            anchors,
-            axis=0,
-        )
-
+        anchors = np.asarray([arr[np.argmin(np.linalg.norm(arr - center, axis=1))]
+                              for arr in eligible])
+        new_center = np.median(anchors, axis=0)
         if np.linalg.norm(new_center - center) < 1e-3:
             break
-
         center = new_center
-
-    #
-    # Use only anchor cloud around crossing.
-    #
-    dx = np.percentile(
-        np.abs(anchors[:, 0] - center[0]),
-        75,
-    )
-
-    dy = np.percentile(
-        np.abs(anchors[:, 1] - center[1]),
-        75,
-    )
-
-    #
-    # junction size
-    #
-    dx = np.clip(
-        dx + 0.5,
-        1.5,
-        3.0,
-    )
-
-    dy = np.clip(
-        dy + 0.5,
-        1.5,
-        3.0,
-    )
-
-    poly = np.array(
-        [
-            [center[0] - dx, center[1] - dy],
-            [center[0] + dx, center[1] - dy],
-            [center[0] + dx, center[1] + dy],
-            [center[0] - dx, center[1] + dy],
-        ],
-        dtype=float,
-    )
-
-    #
-    # never contain entry centers
-    #
+    # Junction size from the anchor cloud.
+    dx = np.clip(np.percentile(np.abs(anchors[:, 0] - center[0]), 75) + 0.5, 1.5, 3.0)
+    dy = np.clip(np.percentile(np.abs(anchors[:, 1] - center[1]), 75) + 0.5, 1.5, 3.0)
+    def rect():
+        return np.array([[center[0] - dx, center[1] - dy], [center[0] + dx, center[1] - dy],
+                         [center[0] + dx, center[1] + dy], [center[0] - dx, center[1] + dy]])
+    poly = rect()
+    # Never contain entry centers.
     for ec in entry_centers:
         while point_in_poly(ec, poly):
-            dx *= 0.95
-            dy *= 0.95
-
-            poly = np.array(
-                [
-                    [center[0] - dx, center[1] - dy],
-                    [center[0] + dx, center[1] - dy],
-                    [center[0] + dx, center[1] + dy],
-                    [center[0] - dx, center[1] + dy],
-                ],
-                dtype=float,
-            )
-
+            dx, dy = dx * 0.95, dy * 0.95
+            poly = rect()
     return poly
 
-
-def build_branch_zones(
-    entry_centers,
-    intersection_poly,
-    trajs,
-):
-    """
-    Build corridor polygons from actual
-    trajectory approach segments.
-
-    Corridors stop at junction boundary.
-    """
-
+def build_branch_zones(entry_centers, intersection_poly, trajs):
+    """Corridor polygons from actual trajectory approach segments, stopping at the junction."""
     center = intersection_poly.mean(axis=0)
-
-    labelled = _assign_entry_labels(
-        trajs,
-        entry_centers,
-    )
-
+    labelled = _assign_entry_labels(trajs, entry_centers)
     zones = {}
-
     for zid, entry in enumerate(entry_centers):
         approach_pts = []
-
         for _, sidx, eidx, arr in labelled:
             if zid not in (sidx, eidx):
                 continue
-
-            #
-            # only use corridor part
-            #
             n = max(10, len(arr) // 4)
-
-            if sidx == zid:
-                approach_pts.append(arr[:n])
-            else:
-                approach_pts.append(arr[-n:])
-
-        if len(approach_pts) == 0:
+            approach_pts.append(arr[:n] if sidx == zid else arr[-n:])
+        if not approach_pts:
             continue
-
         pts = np.vstack(approach_pts)
-
-        #
-        # dominant lane direction
-        #
-        cov = np.cov(pts.T)
-
-        vals, vecs = np.linalg.eigh(cov)
-
-        v = vecs[:, np.argmax(vals)]
-
+        # Dominant lane direction.
+        vals, vecs = np.linalg.eigh(np.cov(pts.T))
+        v = vecs[:, int(np.argmax(vals))]
         if np.dot(center - entry, v) < 0:
             v = -v
-
         nvec = np.array([-v[1], v[0]])
-
-        #
-        # corridor width
-        #
-        rel = pts - entry
-
-        widths = np.abs(rel @ nvec)
-
-        width = np.clip(
-            np.percentile(
-                widths,
-                95,
-            )
-            + 0.25,
-            1.5,
-            3.5,
-        )
-
-        end_pt = _ray_box_boundary_point(
-            entry,
-            center,
-            intersection_poly,
-        )
-
-        zones[zid] = np.array(
-            [
-                entry + width * nvec,
-                entry - width * nvec,
-                end_pt - width * nvec,
-                end_pt + width * nvec,
-            ]
-        )
-
+        # Corridor width.
+        width = np.clip(np.percentile(np.abs((pts - entry) @ nvec), 95) + 0.25, 1.5, 3.5)
+        end_pt = _ray_box_boundary_point(entry, center, intersection_poly)
+        zones[zid] = np.array([entry + width * nvec, entry - width * nvec,
+                               end_pt - width * nvec, end_pt + width * nvec])
     return zones
-
-
-def oriented_uncertainty_box(
-    pos, heading, sigma, vehicle_length=1.8, vehicle_width=1.0, inflation=2.5
-):
-    #
-    # Longitudinal uncertainty is usually larger
-    # than lateral uncertainty.
-    #
-    long_half = 0.5 * vehicle_length + inflation * sigma
-    lat_half = 0.5 * vehicle_width + 0.5 * inflation * sigma
-    c = np.cos(heading)
-    s = np.sin(heading)
-    u = np.array([c, s])
-    v = np.array([-s, c])
-    corners = np.array(
-        [
-            pos + long_half * u + lat_half * v,
-            pos + long_half * u - lat_half * v,
-            pos - long_half * u - lat_half * v,
-            pos - long_half * u + lat_half * v,
-        ]
-    )
-    return {
-        "corners": corners,
-        "center": np.asarray(pos),
-        "heading": float(heading),
-        "sigma": float(sigma),
-        "long_half": float(long_half),
-        "lat_half": float(lat_half),
-    }
-
-
-def robust_heading(track_positions, lookback=15):
-    n = len(track_positions)
-    if n < 2:
-        return 0.0
-    pts = np.asarray(track_positions[max(0, n - lookback) :])
-    dif = np.diff(pts, axis=0)
-    if len(dif) == 0:
-        return 0.0
-    vx = np.median(dif[:, 0])
-    vy = np.median(dif[:, 1])
-    if abs(vx) < 1e-6 and abs(vy) < 1e-6:
-        return 0.0
-    return float(np.arctan2(vy, vx))
-
-
-def constrained_heading(prev_heading, measured_heading, max_turn_deg=10):
-    delta = measured_heading - prev_heading
-    delta = (delta + np.pi) % (2 * np.pi) - np.pi
-    max_turn = np.deg2rad(max_turn_deg)
-    delta = np.clip(delta, -max_turn, max_turn)
-    return prev_heading + delta
-
-
-def compute_localization_uncertainty(
-    track, pos, w, h, inside_overlap_zone=False, yaw_rate_deg=0.0
-):
-    if track.ref_w is None:
-        track.ref_w = w
-        track.ref_h = h
-    track.ref_w = 0.99 * track.ref_w + 0.01 * w
-    track.ref_h = 0.99 * track.ref_h + 0.01 * h
-    rw = w / max(track.ref_w, 1e-6)
-    rh = h / max(track.ref_h, 1e-6)
-    shape_score = max(abs(np.log(rw)), abs(np.log(rh)))
-    if len(track.positions) >= 2:
-        pred = track.positions[-1] + (track.positions[-1] - track.positions[-2])
-        residual = np.linalg.norm(pos - pred)
-    else:
-        residual = 0.0
-    sigma = 0.30
-    sigma *= 1.0 + shape_score
-    sigma *= 1.0 + residual / 2.0
-    #
-    # overlap zones
-    #
-    if inside_overlap_zone:
-        sigma *= 2.0
-    #
-    # impossible turn
-    #
-    if yaw_rate_deg > 20:
-        sigma *= 2.0
-    sigma = min(sigma, 5.0)
-    return sigma
-
 
 def collect_terminal_points(trajs, tail_len=15, max_terminal_radius=2.5):
     terminals = []
     for arr in trajs.values():
         if len(arr) < tail_len:
             continue
-        start_seg = arr[:tail_len]
-        end_seg = arr[-tail_len:]
-        start_center = start_seg.mean(axis=0)
-        end_center = end_seg.mean(axis=0)
-        start_radius = np.max(np.linalg.norm(start_seg - start_center, axis=1))
-        end_radius = np.max(np.linalg.norm(end_seg - end_center, axis=1))
-        #
-        # Only keep endpoints that appear
-        # to remain in the same local area.
-        #
-        if start_radius < max_terminal_radius:
-            terminals.append(start_center)
-        if end_radius < max_terminal_radius:
-            terminals.append(end_center)
+        for seg in (arr[:tail_len], arr[-tail_len:]):
+            c = seg.mean(axis=0)
+            if np.max(np.linalg.norm(seg - c, axis=1)) < max_terminal_radius:
+                terminals.append(c)
     return np.asarray(terminals)
 
-
+# --------------------- data loaders ---------------------
 def load_trajectories(json_path: str) -> Dict[int, np.ndarray]:
-    """
-    Supports two formats:
-    (A) trajectory-based: { "12": [[x,y], ...], ... }
-    (B) frame-based: [
-        { "time_stamp": ..., "object_list": [ {track_id, position_3d}, ... ] },
-        ...
-    ]
-    Returns {track_id -> ndarray(N,2)} for training/analytics.
-    """
-    with open(json_path, "r") as f:
+    """(A) {tid: [[x,y],...]} or (B) frame-based list -> {tid: ndarray(N,2)}."""
+    with open(json_path) as f:
         raw = json.load(f)
-    # CASE A: trajectory-based
+    bucket: Dict[int, np.ndarray] = {}
     if isinstance(raw, dict):
-        trajs: Dict[int, np.ndarray] = {}
         for k, v in raw.items():
             try:
                 tid = int(k)
@@ -673,82 +280,56 @@ def load_trajectories(json_path: str) -> Dict[int, np.ndarray]:
                 continue
             arr = np.asarray(v, dtype=float)
             if arr.ndim == 2 and arr.shape[1] == 2 and arr.shape[0] >= 3:
-                arr = smooth_trajectory(arr, grid=TRAJ_GRID)
-
-                if len(arr) >= 3:
-                    trajs[tid] = arr
-        if not trajs:
-            raise RuntimeError("No valid trajectories found in dict-format JSON.")
-        return trajs
-    # CASE B: frame-based
-    if isinstance(raw, list):
-        bucket: Dict[int, list] = {}
+                bucket[tid] = arr
+    elif isinstance(raw, list):
         for frame in raw:
-            objects = frame.get("object_list", [])
-            for obj in objects:
-                tid = obj.get("track_id", None)
-                pos = obj.get("position_3d", None)
+            for obj in frame.get("object_list", []):
+                tid, pos = obj.get("track_id"), obj.get("position_3d")
                 if tid is None or pos is None:
                     continue
-                x = pos.get("x", None)
-                y = pos.get("y", None)
+                x, y = pos.get("x"), pos.get("y")
                 if x is None or y is None:
                     continue
                 bucket.setdefault(int(tid), []).append([float(x), float(y)])
-        trajs: Dict[int, np.ndarray] = {}
-        for tid, pts in bucket.items():
-            arr = np.asarray(pts, dtype=float)
-            if arr.ndim == 2 and arr.shape[0] >= 3:
-                arr = smooth_trajectory(arr, grid=TRAJ_GRID)
-
-                if len(arr) >= 3:
-                    trajs[tid] = arr
-        if not trajs:
-            raise RuntimeError("No valid trajectories found in frame-based JSON.")
-        return trajs
-    raise RuntimeError("Unrecognized JSON trajectory format.")
-
+    else:
+        raise RuntimeError("Unrecognized JSON trajectory format.")
+    trajs: Dict[int, np.ndarray] = {}
+    for tid, pts in bucket.items():
+        arr = smooth_trajectory(np.asarray(pts, dtype=float), grid=TRAJ_GRID)
+        if len(arr) >= 3:
+            trajs[tid] = arr
+    if not trajs:
+        raise RuntimeError("No valid trajectories found in JSON.")
+    return trajs
 
 def load_frame_based(json_path: str):
-    """
-    Strict loader for frame-based JSON.
-    Returns:
-      frame_list: [timestamp1, timestamp2, ...]
-      frame_objects: [ {tid: [x,y], ...}, ... ]  # only objects present in that frame
-      tid_frame_history: {tid: [(frame_idx, [x,y]), ...] }  # sparse history with indices
-      raw_frames: original list loaded (to allow exporting aligned structure if desired)
-    """
-    with open(json_path, "r") as f:
+    """Strict frame-based loader -> (frame_list, frame_objects, tid_frame_history, raw)."""
+    with open(json_path) as f:
         data = json.load(f)
     if not isinstance(data, list):
-        raise RuntimeError(
-            "This file is not in frame-based JSON format (expected a list)."
-        )
+        raise RuntimeError("This file is not in frame-based JSON format (expected a list).")
     frame_list: List[int] = []
     frame_objects: List[Dict[int, List[float]]] = []
     tid_frame_history: Dict[int, List[Tuple[int, List[float]]]] = {}
     for i, frame in enumerate(data):
-        ts = frame.get("time_stamp")
-        objs = frame.get("object_list", [])
-        frame_list.append(ts)
-        fr_dict: Dict[int, List[float]] = {}
-        for o in objs:
-            tid = o.get("track_id")
-            pos = o.get("position_3d", {})
+        objs: Dict[int, List[float]] = {}
+        for o in frame.get("object_list", []):
+            tid, pos = o.get("track_id"), o.get("position_3d", {})
             if tid is None:
                 continue
             x, y = pos.get("x"), pos.get("y")
             if x is None or y is None:
                 continue
-            fr_dict[int(tid)] = [float(x), float(y)]
+            objs[int(tid)] = [float(x), float(y)]
             tid_frame_history.setdefault(int(tid), []).append((i, [float(x), float(y)]))
-        frame_objects.append(fr_dict)
+        frame_list.append(frame.get("time_stamp"))
+        frame_objects.append(objs)
     return frame_list, frame_objects, tid_frame_history, data
 
-
-# --------------------- Geometry & resampling ---------------------
+# --------------------- resampling & ellipses ---------------------
 def resample_polyline(xy: np.ndarray, m: int = 32) -> np.ndarray:
     """Resample a polyline to m points by arc length."""
+    xy = np.asarray(xy, dtype=float)
     if len(xy) <= 1:
         return np.repeat(xy[:1], m, axis=0)
     d = np.linalg.norm(np.diff(xy, axis=0), axis=1)
@@ -767,9 +348,8 @@ def resample_polyline(xy: np.ndarray, m: int = 32) -> np.ndarray:
         out[i] = xy[j] + t * (xy[j + 1] - xy[j])
     return out
 
-
 def ellipse_params(points: np.ndarray, n_std: float = 2.5):
-    """Return ((cx,cy), width, height, angle_deg) for Gaussian ellipse."""
+    """((cx,cy), width, height, angle_deg) for a Gaussian ellipse."""
     c = points.mean(axis=0)
     cov = np.cov(points.T) if points.shape[0] > 1 else np.eye(2) * 1e-3
     vals, vecs = np.linalg.eigh(cov)
@@ -779,114 +359,95 @@ def ellipse_params(points: np.ndarray, n_std: float = 2.5):
     ang = math.degrees(math.atan2(vecs[1, 0], vecs[0, 0]))
     return (c[0], c[1]), w, h, ang
 
-
 def ellipse_poly(center, width, height, angle_deg, n=200):
     cx, cy = center
     t = np.linspace(0, 2 * np.pi, n)
     ca, sa = np.cos(np.deg2rad(angle_deg)), np.sin(np.deg2rad(angle_deg))
     R = np.array([[ca, -sa], [sa, ca]])
-    E = np.c_[width / 2 * np.cos(t), height / 2 * np.sin(t)] @ R.T + np.array([cx, cy])
-    return E
+    return np.c_[width / 2 * np.cos(t), height / 2 * np.sin(t)] @ R.T + np.array([cx, cy])
 
-
-# ===== ML Model (features, predict, save/load) =====
+# ==========================================================
+# ML Model (features, predict, save/load)
+# ==========================================================
 class MLModel:
-    """Route classifier (start_entry -> end_entry) with learned features and progress-aware dynamics."""
+    """Route classifier (start_entry -> end_entry) with learned features
+    and progress-aware dynamics."""
 
     def __init__(self):
-        self.entry_centers: Optional[np.ndarray] = None  # (K,2)
-        self.entry_ellipses: Optional[List[Tuple]] = None  # [(center,w,h,ang), ...]
+        self.entry_centers: Optional[np.ndarray] = None          # (K,2)
+        self.entry_ellipses: Optional[List[Tuple]] = None        # [(center,w,h,ang), ...]
         self.pair_to_cid: Dict[Tuple[int, int], int] = {}
         self.cid_to_pair: Dict[int, Tuple[int, int]] = {}
-        self.code_centers: Optional[np.ndarray] = None  # (K_code,2)
-        self.pca: Optional[PCA] = None  # shape-PCA (2*32 -> N_PCA)
-        self.mu: Optional[np.ndarray] = None  # feature mean (D,)
-        self.sigma: Optional[np.ndarray] = None  # feature std (D,)
-        self.clf: Optional[LogisticRegression] = None  # multinomial softmax
-        self.class_step_stats: Dict[int, Tuple[np.ndarray, np.ndarray]] = (
-            {}
-        )  # cid -> (mu,cov)
-        # progress-aware
-        self.progress_bins: Optional[np.ndarray] = None  # (B,)
-        self.class_progress_stats: Dict[int, Dict[str, np.ndarray]] = (
-            {}
-        )  # {cid: {"mus","covs","counts","avg_len"}}
+        self.code_centers: Optional[np.ndarray] = None           # (K_code,2)
+        self.pca: Optional[PCA] = None
+        self.mu: Optional[np.ndarray] = None
+        self.sigma: Optional[np.ndarray] = None
+        self.clf: Optional[LogisticRegression] = None
+        self.class_step_stats: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
+        self.progress_bins: Optional[np.ndarray] = None
+        self.class_progress_stats: Dict[int, Dict[str, np.ndarray]] = {}
         self.intersection_poly = None
         self.zone_polys = None
 
-    # -------- features --------
-    def _code_hist(self, dif: np.ndarray) -> np.ndarray:
+    # ---- features ----
+    def _code_hist(self, dif):
         if dif.size == 0:
             return np.zeros(self.code_centers.shape[0], dtype=float)
-        # nearest codeword per step
         d2 = ((dif[:, None, :] - self.code_centers[None, :, :]) ** 2).sum(axis=2)
         idx = np.argmin(d2, axis=1)
         hist = np.bincount(idx, minlength=self.code_centers.shape[0]).astype(float)
         return hist / (hist.sum() + 1e-12)
 
-    def _shape_pca(self, seg: np.ndarray) -> np.ndarray:
+    def _shape_pca(self, seg):
         R = resample_polyline(seg, m=32)
         R = (R - R.mean(axis=0)) / (R.std(axis=0) + 1e-6)
-        flat = R.reshape(-1)
-        return self.pca.transform(flat[None, :])[0]
+        return self.pca.transform(R.reshape(1, -1))[0]
 
-    def seg_features(self, seg: np.ndarray) -> np.ndarray:
+    def seg_features(self, seg):
         dif = np.diff(seg, axis=0)
         spd = np.linalg.norm(dif, axis=1)
         path_len = float(spd.sum()) if len(spd) else 0.0
         net = float(np.linalg.norm(seg[-1] - seg[0]))
-        straight = net / (path_len + 1e-12)
-        mean_v = float(spd.mean()) if len(spd) else 0.0
-        std_v = float(spd.std()) if len(spd) else 0.0
         if len(dif) >= 2:
             th = np.unwrap(np.arctan2(dif[:, 1], dif[:, 0]))
             rev_frac = float(np.mean(np.abs(np.diff(th)) > np.deg2rad(120)))
         else:
             rev_frac = 0.0
         centroid = seg.mean(axis=0)
-        rg = float(np.sqrt(np.mean(((seg - centroid) ** 2).sum(axis=1))))
-        bbox = float(np.linalg.norm(seg.max(axis=0) - seg.min(axis=0)))
-        head = seg[-1]
-        start = seg[0]
-        head_dists = np.linalg.norm(self.entry_centers - head[None, :], axis=1)
-        start_dists = np.linalg.norm(self.entry_centers - start[None, :], axis=1)
-        feat = np.r_[
-            np.array([path_len, net, straight, mean_v, std_v, rev_frac, rg, bbox]),
-            head_dists,
-            start_dists,
+        return np.r_[
+            [path_len, net, net / (path_len + 1e-12),
+             float(spd.mean()) if len(spd) else 0.0, float(spd.std()) if len(spd) else 0.0,
+             rev_frac,
+             float(np.sqrt(np.mean(((seg - centroid) ** 2).sum(axis=1)))),
+             float(np.linalg.norm(seg.max(axis=0) - seg.min(axis=0)))],
+            np.linalg.norm(self.entry_centers - seg[-1], axis=1),
+            np.linalg.norm(self.entry_centers - seg[0], axis=1),
             self._code_hist(dif),
             self._shape_pca(seg),
         ]
-        return feat
 
-    # -------- predict --------
-    def predict_segment_ml(self, seg: np.ndarray, topk: int = 3):
-        x = self.seg_features(seg)
-        xz = (x - self.mu) / self.sigma
-        p = self.clf.predict_proba(xz[None, :])[0]  # (C,)
+    # ---- predict ----
+    def predict_segment_ml(self, seg, topk=3):
+        xz = (self.seg_features(seg) - self.mu) / self.sigma
+        p = self.clf.predict_proba(xz[None, :])[0]
         order = np.argsort(-p)
-        classes = [self.cid_to_pair[int(i)] for i in order[:topk]]
-        probs = [float(p[i]) for i in order[:topk]]
-        return classes, probs, float(1.0 - p[order[0]])
+        top = order[:topk]
+        return ([self.cid_to_pair[int(i)] for i in top],
+                [float(p[i]) for i in top],
+                float(1.0 - p[order[0]]))
 
-    # -------- save/load --------
-    def save(self, path: str):
+    # ---- save / load ----
+    def save(self, path):
         ensure_dir(os.path.dirname(path))
         C = len(self.cid_to_pair)
         cid_to_pair = np.array([self.cid_to_pair[i] for i in range(C)], dtype=int)
-        # class step stats
         mus = np.zeros((C, 2))
         covs = np.zeros((C, 2, 2))
         for i in range(C):
             m, S = self.class_step_stats.get(i, (np.zeros(2), np.eye(2) * 1e-3))
-            mus[i] = m
-            covs[i] = S
-        # entry ellipses
-        ell = np.array(
-            [[e[0][0], e[0][1], e[1], e[2], e[3]] for e in self.entry_ellipses],
-            dtype=float,
-        )
-        # progress-aware
+            mus[i], covs[i] = m, S
+        ell = np.array([[e[0][0], e[0][1], e[1], e[2], e[3]] for e in self.entry_ellipses],
+                       dtype=float)
         if self.progress_bins is None:
             self.progress_bins = np.linspace(0.05, 0.95, 10)
         B = len(self.progress_bins)
@@ -895,26 +456,17 @@ class MLModel:
         pcounts = np.zeros((C, B))
         avg_len = np.zeros(C)
         for i in range(C):
-            st = self.class_progress_stats.get(i, None)
+            st = self.class_progress_stats.get(i)
             if st:
-                pmus[i] = st["mus"]
-                pcovs[i] = st["covs"]
-                pcounts[i] = st["counts"]
-                avg_len[i] = st["avg_len"]
+                pmus[i], pcovs[i], pcounts[i], avg_len[i] = st["mus"], st["covs"], st["counts"], st["avg_len"]
             else:
                 pcovs[i] = np.repeat(np.eye(2)[None, :, :], B, axis=0)
                 avg_len[i] = 1.0
         zone_ids = np.array(sorted((self.zone_polys or {}).keys()), dtype=int)
-        zone_polys = (
-            np.stack([self.zone_polys[i] for i in zone_ids])
-            if len(zone_ids)
-            else np.empty((0, 4, 2), dtype=float)
-        )
-        intersection_poly = (
-            np.asarray(self.intersection_poly, dtype=float)
-            if self.intersection_poly is not None
-            else np.empty((0, 2), dtype=float)
-        )
+        zone_polys = (np.stack([self.zone_polys[i] for i in zone_ids]) if len(zone_ids)
+                      else np.empty((0, 4, 2), dtype=float))
+        intersection_poly = (np.asarray(self.intersection_poly, dtype=float)
+                             if self.intersection_poly is not None else np.empty((0, 2), dtype=float))
         np.savez_compressed(
             path,
             entry_centers=self.entry_centers,
@@ -946,7 +498,7 @@ class MLModel:
         )
 
     @staticmethod
-    def load(path: str) -> "MLModel":
+    def load(path) -> "MLModel":
         z = np.load(path, allow_pickle=False)
         m = MLModel()
         m.entry_centers = z["entry_centers"]
@@ -954,223 +506,123 @@ class MLModel:
             m.intersection_poly = z["intersection_poly"]
         if "zone_ids" in z.files and "zone_polys" in z.files:
             m.zone_polys = {int(i): p for i, p in zip(z["zone_ids"], z["zone_polys"])}
-        ell = z["entry_ellipses"]
-        m.entry_ellipses = [((row[0], row[1]), row[2], row[3], row[4]) for row in ell]
+        m.entry_ellipses = [((r[0], r[1]), r[2], r[3], r[4]) for r in z["entry_ellipses"]]
         m.code_centers = z["code_centers"]
-        # PCA
         pca = PCA(n_components=int(z["pca_n"]), whiten=bool(z["pca_whiten"]))
         pca.mean_ = z["pca_mean"]
         pca.components_ = z["pca_components"]
-        # Required for transform()
-        pca.explained_variance_ = z["pca_explained_variance"]
+        pca.explained_variance_ = z["pca_explained_variance"]       # required by transform()
         pca.explained_variance_ratio_ = z["pca_explained_variance_ratio"]
         pca.singular_values_ = z["pca_singular_values"]
-        # Metadata
         m.pca = pca
         m.mu, m.sigma = z["mu"], z["sigma"]
-        # clf
-        clf = LogisticRegression(solver="lbfgs", max_iter=1)  # dummy
+        clf = LogisticRegression(solver="lbfgs", max_iter=1)        # dummy; weights restored below
         clf.classes_ = z["clf_classes"]
         clf.coef_ = z["clf_coef"]
         clf.intercept_ = z["clf_inter"]
         clf.n_features_in_ = clf.coef_.shape[1]
         clf.n_iter_ = np.array([1], dtype=np.int32)
         m.clf = clf
-        # class id maps
         cid_to_pair = z["cid_to_pair"]
-        m.cid_to_pair = {
-            int(i): (int(cid_to_pair[i, 0]), int(cid_to_pair[i, 1]))
-            for i in range(cid_to_pair.shape[0])
-        }
+        m.cid_to_pair = {int(i): (int(cid_to_pair[i, 0]), int(cid_to_pair[i, 1]))
+                         for i in range(cid_to_pair.shape[0])}
         m.pair_to_cid = {v: k for k, v in m.cid_to_pair.items()}
-        # step stats
-        mus, covs = z["step_mus"], z["step_covs"]
-        for i in range(mus.shape[0]):
-            m.class_step_stats[i] = (mus[i], covs[i])
-        # progress-aware
+        for i in range(z["step_mus"].shape[0]):
+            m.class_step_stats[i] = (z["step_mus"][i], z["step_covs"][i])
         m.progress_bins = z["progress_bins"]
-        pmus, pcovs, pcounts, avg_len = (
-            z["prog_mus"],
-            z["prog_covs"],
-            z["prog_counts"],
-            z["class_avg_len"],
-        )
-        for i in range(pmus.shape[0]):
-            m.class_progress_stats[i] = {
-                "mus": pmus[i],
-                "covs": pcovs[i],
-                "counts": pcounts[i],
-                "avg_len": float(avg_len[i]),
-            }
+        for i in range(z["prog_mus"].shape[0]):
+            m.class_progress_stats[i] = {"mus": z["prog_mus"][i], "covs": z["prog_covs"][i],
+                                         "counts": z["prog_counts"][i],
+                                         "avg_len": float(z["class_avg_len"][i])}
         return m
 
-
 def ensure_model_topology(model, trajs):
-    """Populate topology for legacy model files that predate topology persistence."""
+    """Populate topology for legacy model files predating topology persistence."""
     if model.intersection_poly is None or not model.zone_polys:
-        intersection_poly = detect_intersection_region(
-            trajs,
-            model.entry_centers,
-        )
-        model.intersection_poly = intersection_poly
-        model.zone_polys = build_branch_zones(
-            model.entry_centers,
-            intersection_poly,
-            trajs,
-        )
-
+        model.intersection_poly = detect_intersection_region(trajs, model.entry_centers)
+        model.zone_polys = build_branch_zones(model.entry_centers, model.intersection_poly, trajs)
     return model
 
-
-# ===== Training pipeline & report =====
-def auto_tune_and_train_ml(
-    trajs: Dict[int, np.ndarray],
-    K_ENTRIES: int = 7,
-    K_CODE: int = 16,
-    N_PCA: int = 6,
-    prefix_fracs: List[float] = [0.15, 0.25, 0.35, 0.5, 0.7, 0.9],
-    seed: int = 0,
-) -> MLModel:
-    np.random.default_rng(seed)
+# ==========================================================
+# Training pipeline
+# ==========================================================
+def auto_tune_and_train_ml(trajs, K_ENTRIES=7, K_CODE=16, N_PCA=6,
+                           prefix_fracs=(0.15, 0.25, 0.35, 0.5, 0.7, 0.9), seed=0):
     model = MLModel()
-    # --------------------------------------------------
-    # 1) Entry areas
-    # Detect elongated corridor clusters
-    # --------------------------------------------------
+    # 1) Entry areas: cluster terminal points into corridor entries.
     P = collect_terminal_points(trajs, tail_len=15, max_terminal_radius=2.5)
     if len(P) < K_ENTRIES:
         raise RuntimeError(f"Only {len(P)} terminal samples found.")
-    kmeans_entry = KMeans(n_clusters=K_ENTRIES, random_state=seed, n_init="auto").fit(P)
-    labels = kmeans_entry.labels_
-    centers = kmeans_entry.cluster_centers_
-    #
-    # Build covariance ellipses
-    #
-    raw_ellipses = []
-    keep_clusters = []
-    MAX_ASPECT_RATIO = 3.0
+    km = KMeans(n_clusters=K_ENTRIES, random_state=seed, n_init="auto").fit(P)
+    labels, centers = km.labels_, km.cluster_centers_
+    raw_ellipses, keep = [], []
     for ci in range(K_ENTRIES):
         pts = P[labels == ci]
         if len(pts) < 3:
             continue
         center, w, h, ang = ellipse_params(pts, n_std=2.0)
-        ratio = max(w, h) / max(1e-6, min(w, h))
-        area = w * h
-        npts = len(pts)
-        print(
-            f"[ENTRY {ci}] "
-            f"center=({center[0]:.2f},{center[1]:.2f}) "
-            f"n={npts} "
-            f"w={w:.2f} "
-            f"h={h:.2f} "
-            f"ratio={ratio:.2f} "
-            f"area={area:.2f}"
-        )
-        #
-        # Corridor-like cluster
-        #
-        # if ratio > MAX_ASPECT_RATIO:
-        #     print(
-        #         f"[WARN] Rejecting cluster {ci} "
-        #         f"(aspect={ratio:.2f})"
-        #     )
-        #     continue
+        print(f"[ENTRY {ci}] center=({center[0]:.2f},{center[1]:.2f}) n={len(pts)} "
+              f"w={w:.2f} h={h:.2f} ratio={max(w, h) / max(1e-6, min(w, h)):.2f} area={w * h:.2f}")
+        # (aspect-ratio rejection of non-corridor clusters is currently disabled)
         raw_ellipses.append((ci, center, w, h, ang))
-        keep_clusters.append(ci)
-    if len(keep_clusters) < 2:
+        keep.append(ci)
+    if len(keep) < 2:
         raise RuntimeError("Too few valid entry clusters remain.")
-    #
-    # Stable left→right numbering
-    #
-    kept_centers = np.array([centers[ci] for ci in keep_clusters])
-    order = np.argsort(kept_centers[:, 0])
+    # Stable left->right numbering.
+    order = np.argsort(np.array([centers[ci] for ci in keep])[:, 0])
     old_to_new = {}
-    entry_centers = []
-    entry_ellipses = []
+    entry_centers, entry_ellipses = [], []
     for new_id, idx in enumerate(order):
-        old_id = keep_clusters[idx]
+        old_id = keep[idx]
         old_to_new[old_id] = new_id
-        center = raw_ellipses[idx][1]
-        w = raw_ellipses[idx][2]
-        h = raw_ellipses[idx][3]
-        ang = raw_ellipses[idx][4]
+        _, center, w, h, ang = raw_ellipses[idx]
         entry_centers.append(centers[old_id])
         entry_ellipses.append((center, w, h, ang))
     model.entry_centers = np.asarray(entry_centers, dtype=float)
     model.entry_ellipses = entry_ellipses
-    intersection_poly = detect_intersection_region(
-        trajs,
-        model.entry_centers,
-    )
-
-    model.intersection_poly = intersection_poly
-
-    model.zone_polys = build_branch_zones(
-        model.entry_centers,
-        intersection_poly,
-        trajs,
-    )
-
+    model.intersection_poly = detect_intersection_region(trajs, model.entry_centers)
+    model.zone_polys = build_branch_zones(model.entry_centers, model.intersection_poly, trajs)
     model.old_to_new_entry = old_to_new
     print(f"[INFO] Using {len(entry_centers)} entries")
-    # --------------------------------------------------
-    # Route labels
-    # --------------------------------------------------
+
+    # 2) Route labels.
     traj_pair = {}
-    ENTRY_MATCH_RADIUS = 4.0
     for tid, arr in trajs.items():
-        start_d = np.linalg.norm(centers - arr[0], axis=1)
-        end_d = np.linalg.norm(centers - arr[-1], axis=1)
-        sc_old = int(np.argmin(start_d))
-        ec_old = int(np.argmin(end_d))
-        #
-        # ignore trajectories linked
-        # to rejected corridor cluster
-        #
-        if sc_old not in old_to_new:
+        sd = np.linalg.norm(centers - arr[0], axis=1)
+        ed = np.linalg.norm(centers - arr[-1], axis=1)
+        sc_old, ec_old = int(np.argmin(sd)), int(np.argmin(ed))
+        if sc_old not in old_to_new or ec_old not in old_to_new:
             continue
-        if ec_old not in old_to_new:
+        if sd[sc_old] > 4.0 or ed[ec_old] > 4.0:
             continue
-        if start_d[sc_old] > ENTRY_MATCH_RADIUS:
-            continue
-        if end_d[ec_old] > ENTRY_MATCH_RADIUS:
-            continue
-        sc = old_to_new[sc_old]
-        ec = old_to_new[ec_old]
-        traj_pair[tid] = (sc, ec)
+        traj_pair[tid] = (old_to_new[sc_old], old_to_new[ec_old])
     if len(traj_pair) < 2:
         raise RuntimeError("Too few valid trajectories.")
-    pair_to_cid = {p: i for i, p in enumerate(sorted(set(traj_pair.values())))}
-    model.pair_to_cid = pair_to_cid
-    model.cid_to_pair = {i: p for p, i in pair_to_cid.items()}
-    # 3) Codebook over step vectors
-    steps = [np.diff(arr, axis=0) for arr in trajs.values() if len(arr) >= 2]
-    steps = np.vstack([s for s in steps if len(s)]) if steps else np.zeros((1, 2))
+    model.pair_to_cid = {p: i for i, p in enumerate(sorted(set(traj_pair.values())))}
+    model.cid_to_pair = {i: p for p, i in model.pair_to_cid.items()}
+
+    # 3) Codebook over step vectors.
+    steps_list = [s for s in (np.diff(arr, axis=0) for arr in trajs.values() if len(arr) >= 2) if len(s)]
+    steps = np.vstack(steps_list) if steps_list else np.zeros((1, 2))
     sp = np.linalg.norm(steps, axis=1)
-    lo, hi = (
-        np.quantile(sp, [0.01, 0.99]) if len(sp) > 10 else (sp.min(), sp.max() + 1e-6)
-    )
+    lo, hi = (np.quantile(sp, [0.01, 0.99]) if len(sp) > 10 else (sp.min(), sp.max() + 1e-6))
     base = steps[(sp >= lo) & (sp <= hi)] if len(sp) > 10 else steps
-    model.code_centers = (
-        KMeans(n_clusters=K_CODE, random_state=seed, n_init="auto")
-        .fit(base)
-        .cluster_centers_
-    )
-    # 4) PCA on shapes
+    model.code_centers = KMeans(n_clusters=K_CODE, random_state=seed, n_init="auto").fit(base).cluster_centers_
+
+    # 4) PCA on shapes.
     resampled = []
-    for tid, arr in list(trajs.items())[: min(120, len(trajs))]:
+    for arr in list(trajs.values())[:min(120, len(trajs))]:
         R = resample_polyline(arr, m=32)
-        R = (R - R.mean(axis=0)) / (R.std(axis=0) + 1e-6)
-        resampled.append(R.reshape(-1))
+        resampled.append(((R - R.mean(axis=0)) / (R.std(axis=0) + 1e-6)).reshape(-1))
     Xp = np.vstack(resampled) if resampled else np.zeros((1, 64))
-    pca = PCA(n_components=N_PCA, whiten=False, random_state=seed).fit(Xp)
-    model.pca = pca
-    # 5) Build training set of prefixes
+    model.pca = PCA(n_components=N_PCA, whiten=False, random_state=seed).fit(Xp)
+
+    # 5) Prefix training set.
     X_list, y_list = [], []
     for tid, arr in trajs.items():
         if tid not in traj_pair:
             continue
-        cid = pair_to_cid[traj_pair[tid]]
+        cid = model.pair_to_cid[traj_pair[tid]]
         for f in prefix_fracs:
             n = max(5, int(len(arr) * f))
             if n >= len(arr):
@@ -1183,115 +635,89 @@ def auto_tune_and_train_ml(
     y = np.array(y_list, dtype=int)
     model.mu = X.mean(axis=0)
     model.sigma = X.std(axis=0) + 1e-6
-    Xz = (X - model.mu) / model.sigma
-    # 6) Multinomial logistic regression
+
+    # 6) Multinomial logistic regression.
     clf = LogisticRegression(solver="lbfgs", max_iter=400, random_state=seed)
-    clf.fit(Xz, y)
+    clf.fit((X - model.mu) / model.sigma, y)
     model.clf = clf
-    # 7) Per-class step dynamics
+
+    # 7) Per-class step dynamics.
     class_stats = {}
     for tid, arr in trajs.items():
-        if tid not in traj_pair:
-            continue
-        cid = pair_to_cid[traj_pair[tid]]
-        dif = np.diff(arr, axis=0)
-        if len(dif) == 0:
-            continue
-        class_stats.setdefault(cid, []).append(dif)
+        if tid in traj_pair:
+            class_stats.setdefault(model.pair_to_cid[traj_pair[tid]], []).append(np.diff(arr, axis=0))
     for cid, lst in class_stats.items():
         V = np.vstack(lst)
-        m = V.mean(axis=0)
-        cov = np.cov(V.T) if V.shape[0] > 1 else np.eye(2) * 1e-3
-        model.class_step_stats[cid] = (m, cov)
-    # 8) Progress-aware dynamics (10 bins)
+        model.class_step_stats[cid] = (V.mean(axis=0),
+                                       np.cov(V.T) if V.shape[0] > 1 else np.eye(2) * 1e-3)
+
+    # 8) Progress-aware dynamics (10 bins).
     B = 10
-    bins = np.linspace(0.05, 0.95, B)
-    model.progress_bins = bins
-    prog = {
-        cid: {
-            "sum": np.zeros((B, 2)),
-            "cross": np.zeros((B, 2, 2)),
-            "count": np.zeros(B),
-            "lens": [],
-        }
-        for cid in range(len(model.cid_to_pair))
-    }
+    model.progress_bins = np.linspace(0.05, 0.95, B)
+    prog = {cid: {"sum": np.zeros((B, 2)), "cross": np.zeros((B, 2, 2)),
+                  "count": np.zeros(B), "lens": []} for cid in model.cid_to_pair}
     for tid, arr in trajs.items():
         if tid not in traj_pair:
             continue
-        cid = pair_to_cid[traj_pair[tid]]
+        cid = model.pair_to_cid[traj_pair[tid]]
         d = np.linalg.norm(np.diff(arr, axis=0), axis=1)
-        if len(d) == 0:
+        if not len(d):
             continue
         s = np.r_[0, np.cumsum(d)]
         if s[-1] < 1e-8:
             continue
         dif = np.diff(arr, axis=0)
         for i in range(len(dif)):
-            p = s[i] / s[-1]
-            b = int(np.clip(np.round((B - 1) * p), 0, B - 1))
+            b = int(np.clip(np.round((B - 1) * s[i] / s[-1]), 0, B - 1))
             prog[cid]["sum"][b] += dif[i]
             prog[cid]["cross"][b] += np.outer(dif[i], dif[i])
             prog[cid]["count"][b] += 1
         prog[cid]["lens"].append(s[-1])
-    for cid in range(len(model.cid_to_pair)):
+    for cid in model.cid_to_pair:
         cnt = prog[cid]["count"]
         mus = np.zeros((B, 2))
         covs = np.zeros((B, 2, 2))
         for b in range(B):
             if cnt[b] > 1:
                 mu_b = prog[cid]["sum"][b] / cnt[b]
-                S_b = prog[cid]["cross"][b] / cnt[b] - np.outer(mu_b, mu_b)
                 mus[b] = mu_b
-                covs[b] = S_b + 1e-6 * np.eye(2)
+                covs[b] = prog[cid]["cross"][b] / cnt[b] - np.outer(mu_b, mu_b) + 1e-6 * np.eye(2)
             else:
                 covs[b] = np.eye(2) * 1e-3
-        avg_len = np.mean(prog[cid]["lens"]) if prog[cid]["lens"] else 1.0
         model.class_progress_stats[cid] = {
-            "mus": mus,
-            "covs": covs,
-            "counts": cnt,
-            "avg_len": float(avg_len),
+            "mus": mus, "covs": covs, "counts": cnt,
+            "avg_len": float(np.mean(prog[cid]["lens"]) if prog[cid]["lens"] else 1.0),
         }
     return model
 
-
-def evaluate_prefix_accuracy(
-    trajs: Dict[int, np.ndarray],
-    model: MLModel,
-    prefix_fracs: List[float] = [0.15, 0.25, 0.35, 0.5, 0.7, 0.9],
-    topk: int = 3,
-):
-    # True class per trajectory based on entries
-    true_cid = {}
+def evaluate_prefix_accuracy(trajs, model, prefix_fracs=(0.15, 0.25, 0.35, 0.5, 0.7, 0.9), topk=3):
+    true_pair = {}
     for tid, arr in trajs.items():
-        start_d = np.linalg.norm(model.entry_centers - arr[0], axis=1)
-        end_d = np.linalg.norm(model.entry_centers - arr[-1], axis=1)
-        sc = int(np.argmin(start_d))
-        ec = int(np.argmin(end_d))
-        true_cid[tid] = model.pair_to_cid[(sc, ec)]
+        sc = int(np.argmin(np.linalg.norm(model.entry_centers - arr[0], axis=1)))
+        ec = int(np.argmin(np.linalg.norm(model.entry_centers - arr[-1], axis=1)))
+        if (sc, ec) in model.pair_to_cid:      # skip pairs unseen in training
+            true_pair[tid] = (sc, ec)
     results = []
     for f in prefix_fracs:
         c1 = cK = tot = 0
         for tid, arr in trajs.items():
-            n = max(6, int(len(arr) * f))
-            n = min(n, len(arr) - 1)
+            if tid not in true_pair:
+                continue
+            n = min(max(6, int(len(arr) * f)), len(arr) - 1)
             if n <= 5:
                 continue
-            classes, probs, unc = model.predict_segment_ml(arr[:n], topk=topk)
-            pred_cids = [model.pair_to_cid[c] for c in classes]
-            t = true_cid[tid]
+            classes, _, _ = model.predict_segment_ml(arr[:n], topk=topk)
+            t = true_pair[tid]
             tot += 1
-            if pred_cids[0] == t:
+            if classes[0] == t:
                 c1 += 1
-            if t in pred_cids:
+            if t in classes:
                 cK += 1
         if tot > 0:
             results.append((f, c1 / tot, cK / tot, tot))
     return results
 
-
-def save_accuracy_plot(results, out_path: str):
+def save_accuracy_plot(results, out_path):
     ensure_dir(os.path.dirname(out_path))
     fracs = [r[0] * 100 for r in results]
     top1 = [r[1] * 100 for r in results]
@@ -1312,143 +738,61 @@ def save_accuracy_plot(results, out_path: str):
     fig.savefig(out_path, dpi=160)
     plt.close(fig)
 
-
-# ===== Micro maneuvers detection with FULL tuning =====
-def compute_window_features(seg: np.ndarray):
+# ==========================================================
+# Micro maneuvers
+# ==========================================================
+def compute_window_features(seg):
     seg = np.asarray(seg, dtype=float)
     if len(seg) < 3:
-        return {
-            "path_len": 0.0,
-            "net_disp": 0.0,
-            "efficiency": 0.0,
-            "area": 0.0,
-            "median_speed": 0.0,
-            "speed_p95": 0.0,
-            "heading_std": 0.0,
-            "path_ratio": 0.0,
-        }
+        return {"path_len": 0.0, "net_disp": 0.0, "efficiency": 0.0, "area": 0.0,
+                "median_speed": 0.0, "speed_p95": 0.0, "heading_std": 0.0, "path_ratio": 0.0}
     dif = np.diff(seg, axis=0)
     speed = np.linalg.norm(dif, axis=1)
     path_len = float(speed.sum())
     net_disp = float(np.linalg.norm(seg[-1] - seg[0]))
     efficiency = net_disp / max(path_len, 1e-6)
-    centroid = seg.mean(axis=0)
-    centered = seg - centroid
-    cov = np.cov(centered.T)
-    eigvals = np.maximum(np.linalg.eigvalsh(cov), 1e-8)
-    area = float(np.pi * np.sqrt(eigvals[0]) * np.sqrt(eigvals[1]))
+    cov = np.cov((seg - seg.mean(axis=0)).T)
+    eig = np.maximum(np.linalg.eigvalsh(cov), 1e-8)
     heading = np.unwrap(np.arctan2(dif[:, 1], dif[:, 0]))
-    heading_std = float(np.std(np.diff(heading))) if len(heading) > 1 else 0.0
-    path_ratio = path_len / max(net_disp, 1e-6)
-    return {
-        "path_len": path_len,
-        "net_disp": net_disp,
-        "efficiency": efficiency,
-        "area": area,
-        "median_speed": float(np.median(speed)),
-        "speed_p95": float(np.percentile(speed, 95)),
-        "heading_std": heading_std,
-        "path_ratio": path_ratio,
-    }
-
+    return {"path_len": path_len, "net_disp": net_disp, "efficiency": efficiency,
+            "area": float(np.pi * np.sqrt(eig[0]) * np.sqrt(eig[1])),
+            "median_speed": float(np.median(speed)),
+            "speed_p95": float(np.percentile(speed, 95)),
+            "heading_std": float(np.std(np.diff(heading))) if len(heading) > 1 else 0.0,
+            "path_ratio": path_len / max(net_disp, 1e-6)}
 
 def auto_tune_mode_thresholds(trajs, win=25, rev_angle_deg=120.0):
+    """Reserved for future threshold auto-tuning; result currently unused."""
     return {}
 
-
-def motion_mode_probs(
-    history_seg,
-    recent_seg=None,
-):
-    """
-    Forklift manoeuvre classifier.
-
-    moving
-    loading
-    stationary
-    """
-
-    if recent_seg is None:
-        recent_seg = history_seg
-
+def motion_mode_probs(history_seg, recent_seg=None):
+    """Forklift manoeuvre classifier: moving / loading / stationary."""
     fh = compute_window_features(history_seg)
-
-    fr = compute_window_features(recent_seg)
-
+    fr = compute_window_features(recent_seg if recent_seg is not None else history_seg)
     path_len = 0.3 * fh["path_len"] + 0.7 * fr["path_len"]
-
     net_disp = 0.3 * fh["net_disp"] + 0.7 * fr["net_disp"]
-
     heading_std = 0.3 * fh["heading_std"] + 0.7 * fr["heading_std"]
-
     area = 0.3 * fh["area"] + 0.7 * fr["area"]
-
     efficiency = 0.3 * fh["efficiency"] + 0.7 * fr["efficiency"]
-
-    #
-    # key loading indicator
-    #
-    wandering = path_len / max(net_disp, 0.2)
-
-    #
-    # stationary
-    #
+    wandering = path_len / max(net_disp, 0.2)                 # key loading indicator
     stationary = np.exp(-4.0 * path_len)
-
-    #
-    # loading
-    #
-    loading = (
-        np.tanh(path_len / 2.0)
-        * (1.0 - efficiency)
-        * np.tanh(area / 2.0)
-        * np.tanh(wandering / 3.0)
-    )
-
-    #
-    # moving
-    #
+    loading = (np.tanh(path_len / 2.0) * (1.0 - efficiency)
+               * np.tanh(area / 2.0) * np.tanh(wandering / 3.0))
     moving = np.tanh(net_disp / 3.0) * efficiency * np.exp(-0.3 * heading_std)
-
-    stationary = max(
-        stationary,
-        0.0,
-    )
-
-    loading = max(
-        loading,
-        0.0,
-    )
-
-    moving = max(
-        moving,
-        0.0,
-    )
-
-    s = stationary + loading + moving + 1e-12
-
-    return {
-        "stationary": stationary / s,
-        "loading": loading / s,
-        "moving": moving / s,
-    }
-
+    s = max(stationary, 0.0) + max(loading, 0.0) + max(moving, 0.0) + 1e-12
+    return {"stationary": max(stationary, 0.0) / s,
+            "loading": max(loading, 0.0) / s,
+            "moving": max(moving, 0.0) / s}
 
 class OnlineClassifier:
-    """Combines route class and micro mode with hysteresis and live tuning."""
+    """Route + micro-mode classifier with belief decay and topology-aware labels.
 
-    def __init__(
-        self,
-        model: MLModel,
-        T: dict,
-        window: int = 25,
-        enter_baf: int = 3,
-        exit_baf: int = 5,
-        rev_angle_deg: float = 120.0,
-        baf_sensitivity: float = 1.0,
-        stationary_sens: float = 1.0,
-        bbox_sens: float = 1.0,
-    ):
+    NOTE: enter/exit hysteresis (enter_baf/exit_baf) and the *_sens parameters are
+    accepted for API compatibility but not applied yet.
+    """
+
+    def __init__(self, model, T, window=25, enter_baf=3, exit_baf=5, rev_angle_deg=120.0,
+                 baf_sensitivity=1.0, stationary_sens=1.0, bbox_sens=1.0):
         self.model = model
         self.T = T
         self.window = window
@@ -1459,88 +803,45 @@ class OnlineClassifier:
         self.stationary_sens = stationary_sens
         self.bbox_sens = bbox_sens
         self.mode = "moving"
-        self._on = 0
-        self._off = 0
         self.route_belief = {}
-        self.last_position = None
-        self.mode_votes = []
         self._last_prediction_signature = None
+        self._cached_info = None
 
-    def update(self, prefix: np.ndarray):
-        sig = (
-            len(prefix),
-            round(float(prefix[-1, 0]), 2),
-            round(float(prefix[-1, 1]), 2),
-        )
-
-        if (
-            hasattr(self, "_cached_info")
-            and self._last_prediction_signature == sig
-        ):
+    def update(self, prefix):
+        sig = (len(prefix), round(float(prefix[-1, 0]), 2), round(float(prefix[-1, 1]), 2))
+        if self._cached_info is not None and self._last_prediction_signature == sig:
             return self._cached_info
-
-        self._last_prediction_signature = sig       
-        if len(prefix) >= 2:
-            if np.linalg.norm(prefix[0] - prefix[-1]) < 0.5 and len(prefix) < 10:
-                self.route_belief = {}
+        self._last_prediction_signature = sig
+        if len(prefix) >= 2 and len(prefix) < 10 and np.linalg.norm(prefix[0] - prefix[-1]) < 0.5:
+            self.route_belief = {}
         classes, probs, unc = self.model.predict_segment_ml(prefix)
         DECAY = 0.60
         new_belief = {k: DECAY * v for k, v in self.route_belief.items()}
         for cls, p in zip(classes, probs):
             new_belief[cls] = new_belief.get(cls, 0.0) + (1.0 - DECAY) * float(p)
         s = sum(new_belief.values()) + 1e-12
-        for k in new_belief:
-            new_belief[k] /= s
-        self.route_belief = new_belief
+        self.route_belief = {k: v / s for k, v in new_belief.items()}
         route_pair = max(self.route_belief, key=self.route_belief.get)
         route_prob = self.route_belief[route_pair]
-        history_seg = prefix
-        recent_seg = prefix[-max(6, self.window) :]
-        pm = motion_mode_probs(history_seg, recent_seg)
-        raw_mode = max(pm, key=pm.get)
-        self.mode = raw_mode
-        # --------------------------------------------------
-        # Topology-aware classification
-        # --------------------------------------------------
-        topo = classify_topology_state(self.model, prefix[-1])
-        zone = topo["zone"]
+
+        pm = motion_mode_probs(prefix, prefix[-max(6, self.window):])
+        self.mode = max(pm, key=pm.get)
+
+        # ---- Topology-aware classification ----
+        zone = classify_topology_state(self.model, prefix[-1])["zone"]
+        base_conf = 0.5 * route_prob + 0.5 * max(pm.values())
         if zone == "I":
             display_label = "INTERSECTION"
-            display_conf = (
-                0.5 * route_prob
-                + 0.5 * max(pm.values())
-            )
         elif zone is None:
             display_label = f"ROUTE {route_pair[0]}→{route_pair[1]}"
-            display_conf = (
-                0.5 * route_prob
-                + 0.5 * max(pm.values())
-            )
         else:
-            #
-            # determine motion direction relative
-            # to the intersection center
-            #
+            # Motion direction relative to the intersection center.
             I_center = self.model.intersection_poly.mean(axis=0)
             current_dist = np.linalg.norm(prefix[-1] - I_center)
-            if len(prefix) >= 5:
-                prev_dist = np.linalg.norm(prefix[-5] - I_center)
-            else:
-                prev_dist = current_dist
-            if current_dist < prev_dist:
-                direction = "→I"
-            else:
-                direction = "I→"
+            prev_dist = np.linalg.norm(prefix[-5] - I_center) if len(prefix) >= 5 else current_dist
+            direction = "→I" if current_dist < prev_dist else "I→"
             display_label = f"B{zone} {direction}"
-            display_conf = (
-                0.5 * route_prob
-                + 0.5 * max(pm.values())
-            )
-        topology_confidence = (
-            max(pm.values())
-            if zone == "I"
-            else route_prob
-        )            
+        topology_confidence = max(pm.values()) if zone == "I" else route_prob
         self._cached_info = {
             "topology_zone": zone,
             "topology_label": display_label,
@@ -1550,381 +851,199 @@ class OnlineClassifier:
             "mode": self.mode,
             "mode_probs": pm,
             "display_label": display_label,
-            "display_confidence": display_conf,
+            "display_confidence": base_conf,
             "topology_confidence": topology_confidence,
         }
         return self._cached_info
 
-
-# ===== Forecasting (progress-aware optional) =====
-def blend_velocity(
-    mu_local: np.ndarray,
-    cov_local: np.ndarray,
-    mu_class: np.ndarray,
-    cov_class: np.ndarray,
-    seg_len: int,
-    kappa: float = 0.002,
-):
+# ==========================================================
+# Forecasting (progress-aware optional)
+# ==========================================================
+def blend_velocity(mu_local, cov_local, mu_class, cov_class, seg_len, kappa=0.002):
     alpha = 1.0 - np.exp(-kappa * max(1, seg_len))
-    mu = alpha * mu_local + (1 - alpha) * mu_class
-    cov = alpha * cov_local + (1 - alpha) * cov_class
-    return mu, cov, alpha
+    return (alpha * mu_local + (1 - alpha) * mu_class,
+            alpha * cov_local + (1 - alpha) * cov_class,
+            alpha)
 
-
-def class_progress_velocity(model: MLModel, cid: int, est_progress: float):
+def class_progress_velocity(model, cid, est_progress):
     bins = model.progress_bins
-    bidx = int(np.clip(np.round((len(bins) - 1) * est_progress), 0, len(bins) - 1))
-    st = model.class_progress_stats.get(cid, None)
+    b = int(np.clip(np.round((len(bins) - 1) * est_progress), 0, len(bins) - 1))
+    st = model.class_progress_stats.get(cid)
     if not st:
         return model.class_step_stats.get(cid, (np.zeros(2), np.eye(2) * 1e-3))
-    return st["mus"][bidx], st["covs"][bidx]
+    return st["mus"][b], st["covs"][b]
 
-
-def estimate_progress_for_class(prefix: np.ndarray, model: MLModel, cid: int):
+def estimate_progress_for_class(prefix, model, cid):
     d = np.linalg.norm(np.diff(prefix, axis=0), axis=1)
     obs_len = float(d.sum()) if len(d) else 0.0
     avg_len = model.class_progress_stats.get(cid, {}).get("avg_len", 1.0)
     return float(np.clip(obs_len / max(1e-6, avg_len), 0.0, 1.0))
 
-
-def forecast_particles(
-    prefix: np.ndarray,
-    online,
-    horizon: int,
-    n_particles: int = 1500,
-    seed: int = 0,
-    use_progress_dyn: bool = False,
-    # --- Loading behavior controls ---
-    loading_drift_scale: float = 0.4,
-    loading_cov_scale: float = 1.2,
-    loading_anchor_alpha: float = 0.7,  # 0..1: 1=use centroid, 0=use last point
-    # --- Stationary behavior controls ---
-    stationary_cov_scale: float = 0.25,
-    stationary_eps: float = 5e-5,
-    # --- Numeric safety ---
-    cov_floor: float = 1e-6,
-):
-    """
-    Forecast particle endpoints `parts` at `horizon` steps ahead, conditioned on:
-      - micro-mode from OnlineClassifier (moving / loading / other),
-      - local kinematics from recent window,
-      - class priors (and optionally progress-aware stats).
-    """
+def forecast_particles(prefix, online, horizon, n_particles=1500, seed=0, use_progress_dyn=False,
+                       loading_drift_scale=0.4, loading_cov_scale=1.2, loading_anchor_alpha=0.7,
+                       stationary_cov_scale=0.25, stationary_eps=5e-5, cov_floor=1e-6):
+    """Forecast particle endpoints `horizon` steps ahead, conditioned on the
+    micro-mode, local kinematics and class priors (optionally progress-aware)."""
     rng = np.random.default_rng(seed)
-    # ---------- Local kinematics from recent window ----------
-    w = max(6, online.window)
-    seg = prefix[-w:]
+    # Local kinematics from recent window.
+    seg = prefix[-max(6, online.window):]
     dif = np.diff(seg, axis=0)
     if dif.shape[0] == 0:
-        mu_local = np.zeros(2)
-        cov_local = np.eye(2) * 1e-3
+        mu_local, cov_local = np.zeros(2), np.eye(2) * 1e-3
     elif dif.shape[0] == 1:
-        mu_local = dif[0]
-        cov_local = np.eye(2) * 1e-3
+        mu_local, cov_local = dif[0], np.eye(2) * 1e-3
     else:
-        mu_local = dif.mean(axis=0)
-        cov_local = np.cov(dif.T)
-    # Safety: small floor to keep PSD
+        mu_local, cov_local = dif.mean(axis=0), np.cov(dif.T)
     cov_local = cov_local + 1e-12 * np.eye(2)
-    # ---------- Update classifier and pull class stats ----------
-    if hasattr(online, "_cached_info"):
-        info = online._cached_info
-    else:
-        info = online.update(prefix)
+    # Class stats.
+    info = online._cached_info if online._cached_info is not None else online.update(prefix)
     route_pair = info.get("route_pair")
     if route_pair not in online.model.pair_to_cid:
-        classes, _, _ = online.model.predict_segment_ml(prefix, topk=1)
-        route_pair = classes[0]
+        route_pair = online.model.predict_segment_ml(prefix, topk=1)[0][0]
     cid = online.model.pair_to_cid[route_pair]
-    # Base class stats (average over class)
-    mu_c, cov_c = online.model.class_step_stats.get(
-        cid, (np.zeros(2), np.eye(2) * 1e-3)
-    )
-    # Optionally progress-conditioned stats
+    mu_c, cov_c = online.model.class_step_stats.get(cid, (np.zeros(2), np.eye(2) * 1e-3))
     if use_progress_dyn:
         try:
-            prog = estimate_progress_for_class(prefix, online.model, cid)
-            mu_c, cov_c = class_progress_velocity(online.model, cid, prog)
+            mu_c, cov_c = class_progress_velocity(
+                online.model, cid, estimate_progress_for_class(prefix, online.model, cid))
         except Exception:
-            # Safe fallback if progress estimation not available/robust
-            mu_c, cov_c = online.model.class_step_stats.get(
-                cid, (np.zeros(2), np.eye(2) * 1e-3)
-            )
-    # ---------- Select dynamics by micro-mode ----------
-    mode = info["mode"]
-    if mode == "moving":
-        # Blend local behavior with class priors
-        mu, cov, alpha = blend_velocity(mu_local, cov_local, mu_c, cov_c, len(prefix))
+            mu_c, cov_c = online.model.class_step_stats.get(cid, (np.zeros(2), np.eye(2) * 1e-3))
+    # Select dynamics by micro-mode.
+    if info["mode"] == "moving":
+        mu, cov, _ = blend_velocity(mu_local, cov_local, mu_c, cov_c, len(prefix))
         x0 = prefix[-1]
-    elif mode == "loading":
-        # online.model.class_loading_stats[cid] = (mu_load, cov_load)
-        mu_load, cov_load = online.model.__dict__.get("class_loading_stats", {}).get(
-            cid, (mu_c, cov_c)
-        )
-        # Blend local with (loading-aware) class stats to keep directional structure
-        mu_blend, cov_blend, alpha = blend_velocity(
-            mu_local, cov_local, mu_load, cov_load, len(prefix)
-        )
-        # Loading is "slow drift + jitter"
+    elif info["mode"] == "loading":
+        # Slow drift + jitter; anchor near centroid, keep some last-point weight.
+        mu_load, cov_load = online.model.__dict__.get("class_loading_stats", {}).get(cid, (mu_c, cov_c))
+        mu_blend, cov_blend, _ = blend_velocity(mu_local, cov_local, mu_load, cov_load, len(prefix))
         mu = loading_drift_scale * mu_blend
         cov = loading_cov_scale * cov_blend + 1e-4 * np.eye(2)
-        # Anchor start near the centroid to avoid last-sample bias,
-        # but keep some weight on the last point to preserve directionality.
-        centroid = seg.mean(axis=0)
-        x_last = prefix[-1]
-        x0 = loading_anchor_alpha * centroid + (1.0 - loading_anchor_alpha) * x_last
-    else:
-        # Other non-moving modes (true stationary, parked, etc.)
-        centroid = seg.mean(axis=0)
-        x0 = centroid
+        x0 = loading_anchor_alpha * seg.mean(axis=0) + (1.0 - loading_anchor_alpha) * prefix[-1]
+    else:  # stationary / parked
+        x0 = seg.mean(axis=0)
         mu = np.zeros(2)
         cov = stationary_cov_scale * cov_local + stationary_eps * np.eye(2)
-    # Safety floor for sampling
     cov = cov + cov_floor * np.eye(2)
-    # ---------- Monte Carlo rollout (endpoints only) ----------
+    # Monte Carlo rollout (endpoints only).
     parts = np.tile(x0, (n_particles, 1))
     if horizon > 0:
-        steps = rng.multivariate_normal(mean=mu, cov=cov, size=(horizon, n_particles))
-        # Sum increments across time for endpoints
-        total_increments = steps.sum(axis=0)
-        parts = parts + total_increments
+        parts += rng.multivariate_normal(mean=mu, cov=cov, size=(horizon, n_particles)).sum(axis=0)
     return info, parts
 
-
-# ---- Overlay heatmap + CI95 on an existing Axes (main view) ----
-def draw_heatmap_and_ci95_on_ax(ax, parts: np.ndarray, label="CI95", cmap="magma"):
-    """
-    Draw a smooth heatmap and a CI95 ellipse without rectangular artifacts.
-    """
-    # ---- Heatmap ----
-    H2, xe, ye = np.histogram2d(parts[:, 0], parts[:, 1], bins=80)
-    ax.pcolormesh(
-        xe, ye, H2.T, cmap=cmap, shading="auto", alpha=0.70, edgecolors="none"
-    )
-    # ---- Compute CI95 ellipse ----
+# ---- Heatmap + CI95 drawing ----
+def _ci95_ellipse(parts):
+    """(mu, ellipse_points) at the 95% level (chi2(2) = 5.991)."""
     mu = parts.mean(axis=0)
-    cov = np.cov(parts.T)
-    vals, vecs = np.linalg.eigh(cov)
+    vals, vecs = np.linalg.eigh(np.cov(parts.T))
     order = vals.argsort()[::-1]
-    vals = vals[order]
-    vecs = vecs[:, order]
-    # 95% quantile (Chi^2(2) = 5.991)
+    vals, vecs = vals[order], vecs[:, order]
     k = 5.991
-    r1 = np.sqrt(vals[0] * k)
-    r2 = np.sqrt(vals[1] * k)
-    angle = np.arctan2(vecs[1, 0], vecs[0, 0])
     t = np.linspace(0, 2 * np.pi, 300)
-    ellipse = np.column_stack((r1 * np.cos(t), r2 * np.sin(t))) @ vecs.T + mu
-    ax.plot(ellipse[:, 0], ellipse[:, 1], color="cyan", lw=2, label=label)
+    return mu, np.c_[np.sqrt(k * vals[0]) * np.cos(t), np.sqrt(k * vals[1]) * np.sin(t)] @ vecs.T + mu
+
+def draw_heatmap_and_ci95_on_ax(ax, parts, label="CI95", cmap="magma"):
+    H2, xe, ye = np.histogram2d(parts[:, 0], parts[:, 1], bins=80)
+    ax.pcolormesh(xe, ye, H2.T, cmap=cmap, shading="auto", alpha=0.70, edgecolors="none")
+    _mu, ell = _ci95_ellipse(parts)
+    ax.plot(ell[:, 0], ell[:, 1], color="cyan", lw=2, label=label)
     ax.autoscale(enable=True, axis="both", tight=True)
     ax.set_aspect("equal", "box")
 
-
-### Heatmap
-def plot_future_heatmap_with_CI95(
-    prefix,
-    online,
-    horizon=1,
-    n_particles=2000,
-    seed=0,
-    use_progress_dyn=False,
-    ax=None,
-    title_prefix="H=",
-):
-    info, parts = forecast_particles(
-        prefix,
-        online,
-        horizon=horizon,
-        n_particles=n_particles,
-        seed=seed,
-        use_progress_dyn=use_progress_dyn,
-    )
+def plot_future_heatmap_with_CI95(prefix, online, horizon=1, n_particles=2000, seed=0,
+                                  use_progress_dyn=False, ax=None, title_prefix="H="):
+    info, parts = forecast_particles(prefix, online, horizon=horizon, n_particles=n_particles,
+                                     seed=seed, use_progress_dyn=use_progress_dyn)
     if ax is None:
         fig, ax = plt.subplots(figsize=(6, 5))
     else:
         fig = ax.figure
     H2, xe, ye = np.histogram2d(parts[:, 0], parts[:, 1], bins=120)
     ax.pcolormesh(xe, ye, H2.T, cmap="magma", shading="auto")
-    mu = parts.mean(axis=0)
-    cov = np.cov(parts.T)
-    vals, vecs = np.linalg.eigh(cov)
-    order = vals.argsort()[::-1]
-    vals, vecs = vals[order], vecs[:, order]
-    k = 5.991
-    r1 = np.sqrt(k * vals[0])
-    r2 = np.sqrt(k * vals[1])
-    angle = np.degrees(np.arctan2(vecs[1, 0], vecs[0, 0]))
-    t = np.linspace(0, 2 * np.pi, 300)
-    ellipse_points = np.c_[r1 * np.cos(t), r2 * np.sin(t)] @ vecs.T + mu
-    ax.plot(
-        ellipse_points[:, 0],
-        ellipse_points[:, 1],
-        color="cyan",
-        lw=2,
-        label="CI95 ellipse",
-    )
+    _mu, ell = _ci95_ellipse(parts)
+    ax.plot(ell[:, 0], ell[:, 1], color="cyan", lw=2, label="CI95 ellipse")
     x0 = prefix[-1]
-    ax.scatter(
-        [x0[0]], [x0[1]], c="yellow", edgecolor="k", s=70, zorder=5, label="Current"
-    )
-    lbl = info["display_label"]
-    conf = info["display_confidence"]
-    ax.set_title(f"{title_prefix}{horizon} — {lbl} (conf={conf:.2f})")
+    ax.scatter([x0[0]], [x0[1]], c="yellow", edgecolor="k", s=70, zorder=5, label="Current")
+    ax.set_title(f"{title_prefix}{horizon} — {info['display_label']} (conf={info['display_confidence']:.2f})")
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.legend(loc="best")
     fig.tight_layout()
     return fig, ax
 
-
-# ===== Online state for multi-objects (frame-based) =====
+# ==========================================================
+# Online pool (per-track state, slider-safe replay)
+# ==========================================================
 class OnlinePool:
-    """
-    Keeps a separate OnlineClassifier per track_id and replays history when needed
-    to keep hysteresis consistent as the slider moves.
-    """
+    """One OnlineClassifier per track_id; incremental O(delta) replay so the
+    slider can move both directions without reprocessing history."""
 
-    def __init__(
-        self,
-        model: MLModel,
-        T: dict,
-        window: int = 25,
-        enter_baf: int = 3,
-        exit_baf: int = 5,
-        rev_angle_deg: float = 120.0,
-        baf_sensitivity: float = 1.0,
-        stationary_sens: float = 1.0,
-        bbox_sens: float = 1.0,
-    ):
+    def __init__(self, model, T, window=25, enter_baf=3, exit_baf=5, rev_angle_deg=120.0,
+                 baf_sensitivity=1.0, stationary_sens=1.0, bbox_sens=1.0):
         self.model = model
         self.T = T
-        self.cfg = dict(
-            window=window,
-            enter_baf=enter_baf,
-            exit_baf=exit_baf,
-            rev_angle_deg=rev_angle_deg,
-            baf_sensitivity=baf_sensitivity,
-            stationary_sens=stationary_sens,
-            bbox_sens=bbox_sens,
-        )
-        # tid -> (OnlineClassifier, last_frame_idx_processed)
-        self.store: Dict[int, Tuple[OnlineClassifier, int]] = {}
+        self.cfg = dict(window=window, enter_baf=enter_baf, exit_baf=exit_baf,
+                        rev_angle_deg=rev_angle_deg, baf_sensitivity=baf_sensitivity,
+                        stationary_sens=stationary_sens, bbox_sens=bbox_sens)
+        self.store: Dict[int, dict] = {}
 
-    def _new_online(self) -> OnlineClassifier:
+    def _new_online(self):
         return OnlineClassifier(self.model, self.T, **self.cfg)
 
-    def update_to_frame(
-        self,
-        tid,
-        tid_hist,
-        target_frame,
-    ):
-        """
-        Incremental replay.
-
-        O(delta) instead of O(history).
-        """
-
+    def update_to_frame(self, tid, tid_hist, target_frame):
         if not tid_hist:
             return None
-
         if tid not in self.store:
-
-            online = self._new_online()
-
-            self.store[tid] = {
-                "online": online,
-                "last_frame": -1,
-                "history": deque(),
-                "cursor": 0,
-            }
-
+            self.store[tid] = {"online": self._new_online(), "last_frame": -1,
+                               "history": deque(), "cursor": 0}
         state = self.store[tid]
-
-        #
-        # Slider moved backward.
-        #
-        if state["last_frame"] > target_frame:
-
-            online = self._new_online()
-
-            state = {
-                "online": online,
-                "last_frame": -1,
-                "history": deque(),
-                "cursor": 0,
-            }
-
-            self.store[tid] = state
-
-        online = state["online"]
-
+        if state["last_frame"] > target_frame:          # slider moved backward
+            self.store[tid] = state = {"online": self._new_online(), "last_frame": -1,
+                                       "history": deque(), "cursor": 0}
         cursor = state["cursor"]
-
-        while (
-            cursor < len(tid_hist)
-            and tid_hist[cursor][0] <= target_frame
-        ):
-
-            state["history"].append(
-                tid_hist[cursor][1]
-            )
-
+        while cursor < len(tid_hist) and tid_hist[cursor][0] <= target_frame:
+            state["history"].append(tid_hist[cursor][1])
             cursor += 1
-
         state["cursor"] = cursor
-
         state["last_frame"] = target_frame
-
         if len(state["history"]) < 2:
-            return online, None
-
-        prefix = np.asarray(
-            state["history"],
-            dtype=float,
-        )
-
-        #
-        # Smooth only every few points.
-        #
-        if (
-            not EXPORT_FAST_MODE
-            and len(prefix) > 16
-        ):
-            prefix = smooth_trajectory(
-                prefix,
-                grid=TRAJ_GRID,
-            )
-
-        if (
-            not hasattr(online, "_last_len")
-            or online._last_len != len(prefix)
-        ):
+            return state["online"], None
+        prefix = np.asarray(state["history"], dtype=float)
+        if not EXPORT_FAST_MODE and len(prefix) > 16:
+            prefix = smooth_trajectory(prefix, grid=TRAJ_GRID)
+        online = state["online"]
+        if not hasattr(online, "_last_len") or online._last_len != len(prefix):
             online.update(prefix)
             online._last_len = len(prefix)
-
         return online, prefix
 
     def reset(self):
         self.store.clear()
 
+# ==========================================================
+# Prediction export record (shared by GUI export and CLI export)
+# ==========================================================
+def build_prediction_record(tid, info):
+    a, b = info["route_pair"]
+    return {
+        "track_id": int(tid),
+        "route": {"from": int(a), "to": int(b),
+                  "prob": float(info["route_prob"]),
+                  "uncertainty": float(info["route_uncertainty"])},
+        "topology": {"zone": info.get("topology_zone"),
+                     "label": info.get("topology_label"),
+                     "confidence": float(info.get("topology_confidence", 0.0))},
+        "mode": info["mode"],
+        "mode_probs": {k: float(v) for k, v in info["mode_probs"].items()},
+        "display_label": info["display_label"],
+        "display_confidence": float(info["display_confidence"]),
+    }
 
-# ===== GUI (PyQt6) with frame-mode support and export =====
-def run_gui(
-    trajs: Dict[int, np.ndarray],
-    model: Optional[MLModel],
-    online: Optional[OnlineClassifier],
-    K_ENTRIES: int,
-    K_CODE: int,
-    N_PCA: int,
-    WIN: int,
-    use_progress_dyn: bool,
-    frame_list: Optional[List[int]] = None,
-    frame_objects: Optional[List[Dict[int, List[float]]]] = None,
-    tid_frame_history: Optional[Dict[int, List[Tuple[int, List[float]]]]] = None,
-    orig_frames: Optional[list] = None,
-    source_json_path: Optional[str] = None,
-):
+# ==========================================================
+# GUI (PyQt6)
+# ==========================================================
+def run_gui(trajs, model, online, K_ENTRIES, K_CODE, N_PCA, WIN, use_progress_dyn,
+            frame_list=None, frame_objects=None, tid_frame_history=None,
+            orig_frames=None, source_json_path=None):
     try:
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
         from matplotlib.figure import Figure
@@ -1932,6 +1051,7 @@ def run_gui(
     except Exception:
         print("PyQt6 is required: pip install PyQt6 matplotlib")
         raise
+
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
     class StartDialog(QtWidgets.QDialog):
@@ -1946,19 +1066,15 @@ def run_gui(
             self.btn_load = QtWidgets.QPushButton("Load selected")
             self.btn_train = QtWidgets.QPushButton("Train new")
             self.btn_cancel = QtWidgets.QPushButton("Cancel")
-            h.addWidget(self.btn_load)
-            h.addWidget(self.btn_train)
-            h.addStretch(1)
-            h.addWidget(self.btn_cancel)
+            h.addWidget(self.btn_load); h.addWidget(self.btn_train)
+            h.addStretch(1); h.addWidget(self.btn_cancel)
             v.addLayout(h)
             self.btn_cancel.clicked.connect(self.reject)
             self.btn_load.clicked.connect(self.accept_load)
             self.btn_train.clicked.connect(self.accept_train)
             self.files = list_saved_models()
             for p in self.files:
-                ts = datetime.fromtimestamp(os.path.getmtime(p)).strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
+                ts = datetime.fromtimestamp(os.path.getmtime(p)).strftime("%Y-%m-%d %H:%M:%S")
                 self.list.addItem(f"{os.path.basename(p)} ({ts})")
             self.choice = None
 
@@ -1974,6 +1090,11 @@ def run_gui(
             self.choice = ("train", None)
             self.accept()
 
+    def _make_online(m):
+        T = auto_tune_mode_thresholds(trajs, win=WIN, rev_angle_deg=120.0)
+        return OnlineClassifier(m, T, window=WIN, enter_baf=3, exit_baf=5, rev_angle_deg=120.0,
+                                baf_sensitivity=1.0, stationary_sens=1.0, bbox_sens=1.0)
+
     if model is None or online is None:
         dlg = StartDialog()
         if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
@@ -1981,122 +1102,61 @@ def run_gui(
         ch, path = dlg.choice
         if ch == "load":
             model = ensure_model_topology(MLModel.load(path), trajs)
-            T = auto_tune_mode_thresholds(trajs, win=WIN, rev_angle_deg=120.0)
-            online = OnlineClassifier(
-                model,
-                T,
-                window=WIN,
-                enter_baf=3,
-                exit_baf=5,
-                rev_angle_deg=120.0,
-                baf_sensitivity=1.0,
-                stationary_sens=1.0,
-                bbox_sens=1.0,
-            )
+            online = _make_online(model)
         else:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
             try:
                 model = auto_tune_and_train_ml(trajs, K_ENTRIES, K_CODE, N_PCA)
                 savep = timestamped_model_path()
                 model.save(savep)
-                QtWidgets.QMessageBox.information(
-                    None, "Model saved", f"Saved:\n{savep}"
-                )
+                QtWidgets.QMessageBox.information(None, "Model saved", f"Saved:\n{savep}")
             finally:
                 QtWidgets.QApplication.restoreOverrideCursor()
-            T = auto_tune_mode_thresholds(trajs, win=WIN, rev_angle_deg=120.0)
-            online = OnlineClassifier(
-                model,
-                T,
-                window=WIN,
-                enter_baf=3,
-                exit_baf=5,
-                rev_angle_deg=120.0,
-                baf_sensitivity=1.0,
-                stationary_sens=1.0,
-                bbox_sens=1.0,
-            )
+            online = _make_online(model)
 
     class TrajPlayer(QtWidgets.QMainWindow):
-        """
-        Trajectory monitor with dual modes:
-        1) Trajectory-mode (original): single trajectory scrub by prefix.
-        2) Frame-mode: time-synced frames, multiple objects per frame with selection and export.
-        - Maintains 1:1 aspect plotting
-        - Optionally overlay forecast for selected object
-        - Table of all active objects' predictions per frame
-        - Export predictions to new JSON file
-        """
+        """Trajectory monitor: trajectory-mode (single scrub) and frame-mode
+        (time-synced multi-object with selection, table and JSON export)."""
 
-        def __init__(
-            self,
-            trajs,
-            model,
-            online,
-            bg_image_path: str = None,
-            bg_extent: tuple = None,  # (xmin, xmax, ymin, ymax)
-            bg_origin: str = "lower",
-            bg_alpha: float = 0.85,
-            frame_list: Optional[List[int]] = None,
-            frame_objects: Optional[List[Dict[int, List[float]]]] = None,
-            tid_frame_history: Optional[
-                Dict[int, List[Tuple[int, List[float]]]]
-            ] = None,
-            orig_frames: Optional[list] = None,
-            source_json_path: Optional[str] = None,
-        ):
+        def __init__(self, trajs, model, online, bg_image_path=None, bg_extent=None,
+                     bg_origin="lower", bg_alpha=0.85, frame_list=None, frame_objects=None,
+                     tid_frame_history=None, orig_frames=None, source_json_path=None):
             super().__init__()
             self.setWindowTitle("Trajectory Monitor — Warehouse forklift")
             self.trajs = trajs
             self.model = model
-            self.online_single = online  # used in trajectory mode
+            self.online_single = online
             self.use_progress_dyn = use_progress_dyn
             self.tids = sorted(trajs.keys()) if trajs else []
             self.cur_tid = self.tids[0] if self.tids else None
             self.cur_idx = 6
-            # --- Frame mode data ---
             self.frame_list = frame_list
             self.frame_objects = frame_objects
             self.tid_frame_history = tid_frame_history
-            self.orig_frames = orig_frames
+            self.orig_frames = orig_frames                # kept for API compat (unused)
             self.source_json_path = source_json_path
             self.use_frame_mode = frame_list is not None and frame_objects is not None
             self.current_frame = 0
             self.selected_tid = None
-            # Keep per-object online states in frame-mode
-            self.T = auto_tune_mode_thresholds(
-                self.trajs,
-                win=self.online_single.window,
-                rev_angle_deg=self.online_single.rev_angle_deg,
-            )
-            self.pool = OnlinePool(
-                self.model,
-                self.T,
-                window=self.online_single.window,
-                enter_baf=self.online_single.enter_baf,
-                exit_baf=self.online_single.exit_baf,
-                rev_angle_deg=self.online_single.rev_angle_deg,
-                baf_sensitivity=self.online_single.baf_sensitivity,
-                stationary_sens=self.online_single.stationary_sens,
-                bbox_sens=self.online_single.bbox_sens,
-            )
-            # --- Background config ---
-            self.bg_image_path = bg_image_path
-            self.bg_extent = bg_extent
-            self.bg_origin = bg_origin
-            self.bg_alpha = bg_alpha
+            os_ = self.online_single
+            T = auto_tune_mode_thresholds(self.trajs, win=os_.window, rev_angle_deg=os_.rev_angle_deg)
+            self.pool = OnlinePool(self.model, T, window=os_.window, enter_baf=os_.enter_baf,
+                                   exit_baf=os_.exit_baf, rev_angle_deg=os_.rev_angle_deg,
+                                   baf_sensitivity=os_.baf_sensitivity,
+                                   stationary_sens=os_.stationary_sens, bbox_sens=os_.bbox_sens)
+            self.bg_image_path, self.bg_extent, self.bg_origin, self.bg_alpha = (
+                bg_image_path, bg_extent, bg_origin, bg_alpha)
             self._bg_img = None
             self._view_extent = None
-            # --- Timer ---
             self._was_playing = False
             self.timer = QtCore.QTimer(self)
             self.timer.setInterval(80)
             self.timer.timeout.connect(self.step_forward)
-            # --- Layout ---
+
+            # ---- layout ----
             main = QtWidgets.QWidget(self)
             self.setCentralWidget(main)
             root = QtWidgets.QHBoxLayout(main)
-            # Left: plot + controls
             left = QtWidgets.QVBoxLayout()
             self.fig_main = Figure(figsize=(4, 6), tight_layout=True)
             self.ax_main = self.fig_main.add_subplot(111)
@@ -2107,10 +1167,10 @@ def run_gui(
                 pass
             self.canvas_main = FigureCanvas(self.fig_main)
             left.addWidget(self.canvas_main, stretch=6)
-            # Controls row
             ctrl = QtWidgets.QHBoxLayout()
             self.cb = QtWidgets.QComboBox()
-            [self.cb.addItem(str(t)) for t in self.tids]
+            for t in self.tids:
+                self.cb.addItem(str(t))
             self.cb.currentIndexChanged.connect(self.change_tid)
             self.btn_play = QtWidgets.QPushButton("Play")
             self.btn_play.clicked.connect(self.toggle)
@@ -2122,13 +1182,10 @@ def run_gui(
             self.btn_r.clicked.connect(self.reset_pos)
             ctrl.addWidget(QtWidgets.QLabel("Trajectory:"))
             ctrl.addWidget(self.cb)
-            ctrl.addWidget(self.btn_play)
-            ctrl.addWidget(self.btn_b)
-            ctrl.addWidget(self.btn_f)
-            ctrl.addWidget(self.btn_r)
+            for b in (self.btn_play, self.btn_b, self.btn_f, self.btn_r):
+                ctrl.addWidget(b)
             ctrl.addStretch(1)
             left.addLayout(ctrl)
-            # Frame-mode: object picker + save predictions
             ctrl3 = QtWidgets.QHBoxLayout()
             self.cb_objects = QtWidgets.QComboBox()
             self.cb_objects.currentIndexChanged.connect(self.on_object_selected)
@@ -2140,18 +1197,16 @@ def run_gui(
                 ctrl3.addStretch(1)
                 ctrl3.addWidget(self.btn_save_pred)
                 left.addLayout(ctrl3)
-            # Prefix slider row (used for both modes, but meaning differs)
             ctrl2 = QtWidgets.QHBoxLayout()
             ctrl2.addWidget(QtWidgets.QLabel("Position"))
             self.sld_prefix = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-            self.lbl_prefix = QtWidgets.QLabel("")  # set later
+            self.lbl_prefix = QtWidgets.QLabel("")
             self.sld_prefix.valueChanged.connect(self._on_prefix_slider_changed)
             self.sld_prefix.sliderPressed.connect(self._on_prefix_slider_pressed)
             self.sld_prefix.sliderReleased.connect(self._on_prefix_slider_released)
             ctrl2.addWidget(self.sld_prefix, stretch=1)
             ctrl2.addWidget(self.lbl_prefix)
             left.addLayout(ctrl2)
-            # Right: route + micro + table
             right = QtWidgets.QVBoxLayout()
             self.fig_route = Figure(figsize=(4, 3), tight_layout=True)
             self.ax_route = self.fig_route.add_subplot(111)
@@ -2161,75 +1216,64 @@ def run_gui(
             self.ax_micro = self.fig_micro.add_subplot(111)
             self.canvas_micro = FigureCanvas(self.fig_micro)
             right.addWidget(self.canvas_micro, stretch=1)
-            # Table of active objects (frame-mode)
             self.table = QtWidgets.QTableWidget()
             self.table.setColumnCount(7)
             self.table.setHorizontalHeaderLabels(
-                ["track_id", "label", "conf", "mode", "p(mov)", "p(load)", "p(stat)"]
-            )
+                ["track_id", "label", "conf", "mode", "p(mov)", "p(load)", "p(stat)"])
             self.table.horizontalHeader().setStretchLastSection(True)
             if self.use_frame_mode:
                 right.addWidget(self.table, stretch=1)
-            # Tuning panel
+            # Tuning panel (NOTE: sensitivity values are stored but not applied yet)
             pane = QtWidgets.QGroupBox("Maneuvers Tuning")
             form = QtWidgets.QFormLayout(pane)
             self.sld_baf = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
             self.sld_baf.setRange(5, 30)
-            self.sld_baf.setValue(int(self.online_single.baf_sensitivity * 10))
-            self.lbl_baf = QtWidgets.QLabel(f"{self.online_single.baf_sensitivity:.2f}")
+            self.sld_baf.setValue(int(os_.baf_sensitivity * 10))
+            self.lbl_baf = QtWidgets.QLabel(f"{os_.baf_sensitivity:.2f}")
             self.sld_baf.valueChanged.connect(lambda _: self._update_sens())
             row = QtWidgets.QHBoxLayout()
-            row.addWidget(self.sld_baf)
-            row.addWidget(self.lbl_baf)
+            row.addWidget(self.sld_baf); row.addWidget(self.lbl_baf)
             form.addRow("Loading sensitivity (0.5-3.0)", row)
             self.spn_rev = QtWidgets.QSpinBox()
             self.spn_rev.setRange(60, 180)
-            self.spn_rev.setValue(int(self.online_single.rev_angle_deg))
+            self.spn_rev.setValue(int(os_.rev_angle_deg))
             self.spn_rev.valueChanged.connect(self._apply_tuning)
             form.addRow("Reversal angle (deg)", self.spn_rev)
             self.spn_win = QtWidgets.QSpinBox()
             self.spn_win.setRange(5, 60)
-            self.spn_win.setValue(self.online_single.window)
+            self.spn_win.setValue(os_.window)
             self.spn_win.valueChanged.connect(self._apply_tuning)
             form.addRow("Window size", self.spn_win)
             self.spn_enter = QtWidgets.QSpinBox()
             self.spn_enter.setRange(1, 20)
-            self.spn_enter.setValue(self.online_single.enter_baf)
+            self.spn_enter.setValue(os_.enter_baf)
             self.spn_enter.valueChanged.connect(self._apply_tuning)
             form.addRow("Loading enter frames", self.spn_enter)
             self.spn_exit = QtWidgets.QSpinBox()
             self.spn_exit.setRange(1, 20)
-            self.spn_exit.setValue(self.online_single.exit_baf)
+            self.spn_exit.setValue(os_.exit_baf)
             self.spn_exit.valueChanged.connect(self._apply_tuning)
             form.addRow("Loading exit frames", self.spn_exit)
             self.sld_stat = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
             self.sld_stat.setRange(5, 30)
-            self.sld_stat.setValue(int(self.online_single.stationary_sens * 10))
-            self.lbl_stat = QtWidgets.QLabel(
-                f"{self.online_single.stationary_sens:.2f}"
-            )
-            self.sld_stat.valueChanged.connect(self._update_sens)
+            self.sld_stat.setValue(int(os_.stationary_sens * 10))
+            self.lbl_stat = QtWidgets.QLabel(f"{os_.stationary_sens:.2f}")
+            self.sld_stat.valueChanged.connect(lambda _: self._update_sens())
             row2 = QtWidgets.QHBoxLayout()
-            row2.addWidget(self.sld_stat)
-            row2.addWidget(self.lbl_stat)
+            row2.addWidget(self.sld_stat); row2.addWidget(self.lbl_stat)
             form.addRow("Stationary sensitivity (0.5-3.0)", row2)
             self.sld_bbox = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
             self.sld_bbox.setRange(5, 30)
-            self.sld_bbox.setValue(int(self.online_single.bbox_sens * 10))
-            self.lbl_bbox = QtWidgets.QLabel(f"{self.online_single.bbox_sens:.2f}")
-            self.sld_bbox.valueChanged.connect(self._update_sens)
+            self.sld_bbox.setValue(int(os_.bbox_sens * 10))
+            self.lbl_bbox = QtWidgets.QLabel(f"{os_.bbox_sens:.2f}")
+            self.sld_bbox.valueChanged.connect(lambda _: self._update_sens())
             row3 = QtWidgets.QHBoxLayout()
-            row3.addWidget(self.sld_bbox)
-            row3.addWidget(self.lbl_bbox)
+            row3.addWidget(self.sld_bbox); row3.addWidget(self.lbl_bbox)
             form.addRow("BBox tightness sensitivity (0.5-3.0)", row3)
-            # Toggle: show forecast overlay
-            self.chk_overlay = QtWidgets.QCheckBox(
-                "Show forecasted future positions (5 frames ahead)"
-            )
+            self.chk_overlay = QtWidgets.QCheckBox("Show forecasted future positions (5 frames ahead)")
             self.chk_overlay.setChecked(True)
             self.chk_overlay.stateChanged.connect(self.update_all)
             form.addRow(self.chk_overlay)
-            # Popup heatmaps (uses selected object in frame-mode)
             self.btn_heat = QtWidgets.QPushButton("Show heatmaps (H=1,2,3)")
             self.btn_heat.clicked.connect(self.show_heatmaps)
             form.addRow(self.btn_heat)
@@ -2238,7 +1282,6 @@ def run_gui(
             root.addLayout(right, stretch=2)
             self.current_bev = None
             self.current_bev_ts = None
-            # Prepare background, slider, etc.
             self._prepare_background_config()
             self._setup_prefix_slider()
             self.update_all()
@@ -2250,58 +1293,35 @@ def run_gui(
                 pass
             self.update_all()
 
-        # ---------- Background helpers ----------
+        # ---------- background ----------
         def load_bev_image(self, timestamp):
             if not bev_lookup:
                 return None
-
             ts = int(timestamp)
-
-            if ts in bev_lookup:
-                img_ts = ts
-            else:
+            if ts not in bev_lookup:
                 keys = np.asarray(list(bev_lookup.keys()), dtype=np.int64)
-                img_ts = int(keys[np.argmin(np.abs(keys - ts))])
-
-            path = os.path.join(BEV_FOLDER, bev_lookup[img_ts])
-
+                ts = int(keys[np.argmin(np.abs(keys - ts))])
+            path = os.path.join(BEV_FOLDER, bev_lookup[ts])
             img = cv2.imread(path)
-
-            if img is None:
-                return None
-
-            return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            return cv2.cvtColor(img, cv2.COLOR_BGR2RGB) if img is not None else None
 
         def vis_xy(self, x, y):
             if self.current_bev is None:
                 return x, y
-
             return world_to_occupancy(x, y)
 
         def vis_poly(self, poly):
             poly = np.asarray(poly)
-
-            return np.asarray(
-                [self.vis_xy(x, y) for x, y in poly],
-                dtype=float,
-            )
+            return np.asarray([self.vis_xy(x, y) for x, y in poly], dtype=float)
 
         def _data_bounds(self):
-            """Return (xmin, xmax, ymin, ymax) across all trajectories with small padding."""
             if self.use_frame_mode and self.frame_objects:
-                all_pts = []
-                for fr in self.frame_objects:
-                    for xy in fr.values():
-                        all_pts.append(xy)
+                all_pts = [xy for fr in self.frame_objects for xy in fr.values()]
                 if not all_pts:
                     all_pts = [np.zeros(2)]
                 all_pts = np.asarray(all_pts, dtype=float)
             else:
-                all_pts = (
-                    np.vstack(list(self.trajs.values()))
-                    if self.trajs
-                    else np.zeros((1, 2))
-                )
+                all_pts = np.vstack(list(self.trajs.values())) if self.trajs else np.zeros((1, 2))
             xmin, ymin = all_pts.min(axis=0)
             xmax, ymax = all_pts.max(axis=0)
             pad_x = 0.05 * (xmax - xmin + 1e-9)
@@ -2309,19 +1329,15 @@ def run_gui(
             return xmin - pad_x, xmax + pad_x, ymin - pad_y, ymax + pad_y
 
         def _square_from_bounds(self, xmin, xmax, ymin, ymax):
-            """Expand bounds to a square extent centered at the box center."""
-            cx = 0.5 * (xmin + xmax)
-            cy = 0.5 * (ymin + ymax)
+            cx, cy = 0.5 * (xmin + xmax), 0.5 * (ymin + ymax)
             span = max(xmax - xmin, ymax - ymin)
             return (cx - 0.5 * span, cx + 0.5 * span, cy - 0.5 * span, cy + 0.5 * span)
 
         def _prepare_background_config(self):
             if self.bg_extent is None:
-                xmin, xmax, ymin, ymax = self._data_bounds()
-                self._view_extent = self._square_from_bounds(xmin, xmax, ymin, ymax)
+                self._view_extent = self._square_from_bounds(*self._data_bounds())
             else:
-                xmin, xmax, ymin, ymax = self.bg_extent
-                self._view_extent = self._square_from_bounds(xmin, xmax, ymin, ymax)
+                self._view_extent = self._square_from_bounds(*self.bg_extent)
             if self.bg_image_path:
                 try:
                     self._bg_img = mpimg.imread(self.bg_image_path)
@@ -2329,60 +1345,40 @@ def run_gui(
                     print(f"[TrajPlayer] Could not load background image: {e}")
                     self._bg_img = None
 
-        # ---------- Slider helpers ----------
+        # ---------- slider ----------
         def _setup_prefix_slider(self):
             if self.use_frame_mode:
-                minv = 0
-                maxv = max(0, len(self.frame_list) - 1)
-                self.sld_prefix.blockSignals(True)
-                self.sld_prefix.setRange(minv, maxv)
-                page = max(1, (maxv - minv) // 10)
-                self.sld_prefix.setPageStep(page)
-                self.sld_prefix.setSingleStep(1)
-                self.sld_prefix.setTickInterval(page)
-                self.sld_prefix.setTickPosition(
-                    QtWidgets.QSlider.TickPosition.TicksBelow
-                )
+                minv, maxv = 0, max(0, len(self.frame_list) - 1)
                 self.sld_prefix.setValue(self.current_frame)
-                self.sld_prefix.blockSignals(False)
-                self._update_prefix_label()
             else:
-                arr = (
-                    self.trajs[self.cur_tid]
-                    if self.cur_tid is not None
-                    else np.zeros((7, 2))
-                )
-                minv = 6
-                maxv = max(minv + 1, len(arr) - 1)
-                self.sld_prefix.blockSignals(True)
-                self.sld_prefix.setRange(minv, maxv)
-                page = max(1, (maxv - minv) // 10)
-                self.sld_prefix.setPageStep(page)
-                self.sld_prefix.setSingleStep(1)
-                self.sld_prefix.setTickInterval(page)
-                self.sld_prefix.setTickPosition(
-                    QtWidgets.QSlider.TickPosition.TicksBelow
-                )
+                arr = self.trajs[self.cur_tid] if self.cur_tid is not None else np.zeros((7, 2))
+                minv, maxv = 6, max(7, len(arr) - 1)
                 self.sld_prefix.setValue(max(minv, min(self.cur_idx, maxv)))
-                self.sld_prefix.blockSignals(False)
-                self._update_prefix_label()
+            self.sld_prefix.blockSignals(True)
+            self.sld_prefix.setRange(minv, maxv)
+            page = max(1, (maxv - minv) // 10)
+            self.sld_prefix.setPageStep(page)
+            self.sld_prefix.setSingleStep(1)
+            self.sld_prefix.setTickInterval(page)
+            self.sld_prefix.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+            if self.use_frame_mode:
+                self.sld_prefix.setValue(self.current_frame)
+            else:
+                self.sld_prefix.setValue(max(minv, min(self.cur_idx, maxv)))
+            self.sld_prefix.blockSignals(False)
+            self._update_prefix_label()
 
         def _update_prefix_label(self):
             if self.use_frame_mode:
                 ts = self.frame_list[self.current_frame] if self.frame_list else None
-                self.lbl_prefix.setText(
-                    f"frame {self.current_frame + 1}/{len(self.frame_list)}  ts={ts}"
-                )
+                self.lbl_prefix.setText(f"frame {self.current_frame + 1}/{len(self.frame_list)}  ts={ts}")
             else:
                 total = len(self.trajs[self.cur_tid]) if self.cur_tid is not None else 0
                 self.lbl_prefix.setText(f"{self.cur_idx}/{total}")
 
         def _sync_prefix_slider(self):
             self.sld_prefix.blockSignals(True)
-            if self.use_frame_mode:
-                self.sld_prefix.setValue(self.current_frame)
-            else:
-                self.sld_prefix.setValue(self.cur_idx)
+            self.sld_prefix.setValue(self.current_frame if self.use_frame_mode else self.cur_idx)
             self.sld_prefix.blockSignals(False)
             self._update_prefix_label()
 
@@ -2396,7 +1392,7 @@ def run_gui(
                 self.timer.start()
             self._was_playing = False
 
-        def _on_prefix_slider_changed(self, val: int):
+        def _on_prefix_slider_changed(self, val):
             if self.use_frame_mode:
                 self.current_frame = val
             else:
@@ -2405,7 +1401,7 @@ def run_gui(
             self._update_prefix_label()
             self.update_all()
 
-        # ---------- Tuning handlers ----------
+        # ---------- tuning ----------
         def _update_sens(self):
             s_baf = self.sld_baf.value() / 10.0
             s_stat = self.sld_stat.value() / 10.0
@@ -2416,10 +1412,7 @@ def run_gui(
             self.lbl_stat.setText(f"{s_stat:.2f}")
             self.online_single.bbox_sens = s_bbox
             self.lbl_bbox.setText(f"{s_bbox:.2f}")
-            # propagate to pool
-            self.pool.cfg.update(
-                baf_sensitivity=s_baf, stationary_sens=s_stat, bbox_sens=s_bbox
-            )
+            self.pool.cfg.update(baf_sensitivity=s_baf, stationary_sens=s_stat, bbox_sens=s_bbox)
             self.pool.reset()
             self.update_all()
 
@@ -2428,17 +1421,14 @@ def run_gui(
             self.online_single.window = int(self.spn_win.value())
             self.online_single.enter_baf = int(self.spn_enter.value())
             self.online_single.exit_baf = int(self.spn_exit.value())
-            # propagate to pool and reset states (hysteresis depends on config)
-            self.pool.cfg.update(
-                window=self.online_single.window,
-                enter_baf=self.online_single.enter_baf,
-                exit_baf=self.online_single.exit_baf,
-                rev_angle_deg=self.online_single.rev_angle_deg,
-            )
+            self.pool.cfg.update(window=self.online_single.window,
+                                 enter_baf=self.online_single.enter_baf,
+                                 exit_baf=self.online_single.exit_baf,
+                                 rev_angle_deg=self.online_single.rev_angle_deg)
             self.pool.reset()
             self.update_all()
 
-        # ---------- Playback ----------
+        # ---------- playback ----------
         def change_tid(self, idx):
             if not self.tids:
                 return
@@ -2448,14 +1438,15 @@ def run_gui(
             self.update_all()
 
         def toggle(self):
-            (self.timer.stop() if self.timer.isActive() else self.timer.start())
+            if self.timer.isActive():
+                self.timer.stop()
+            else:
+                self.timer.start()
             self.btn_play.setText("Pause" if self.timer.isActive() else "Play")
 
         def step_forward(self):
             if self.use_frame_mode:
-                self.current_frame = min(
-                    len(self.frame_list) - 1, self.current_frame + 1
-                )
+                self.current_frame = min(len(self.frame_list) - 1, self.current_frame + 1)
                 self.update_all()
                 if self.current_frame >= len(self.frame_list) - 1:
                     self.timer.stop()
@@ -2483,237 +1474,100 @@ def run_gui(
                 self.cur_idx = 6
             self.update_all()
 
-        # ---------- Drawing helpers ----------
+        # ---------- drawing ----------
         def _draw_background(self):
             if self.current_bev is not None:
                 h, w = self.current_bev.shape[:2]
-
-                self.ax_main.imshow(
-                    self.current_bev,
-                    extent=(0, w, h, 0),
-                    zorder=0,
-                )
-
+                self.ax_main.imshow(self.current_bev, extent=(0, w, h, 0), zorder=0)
                 self.ax_main.set_xlim(0, w)
                 self.ax_main.set_ylim(h, 0)
-
                 self.ax_main.autoscale(False)
-
             elif self._bg_img is not None and self._view_extent is not None:
-                self.ax_main.imshow(
-                    self._bg_img,
-                    extent=self._view_extent,
-                    origin=self.bg_origin,
-                    alpha=self.bg_alpha,
-                    zorder=0,
-                )
-
+                self.ax_main.imshow(self._bg_img, extent=self._view_extent,
+                                    origin=self.bg_origin, alpha=self.bg_alpha, zorder=0)
             self.ax_main.set_aspect("equal")
 
         def draw_topology(self):
             if self.model.zone_polys:
                 for zid, poly in sorted(self.model.zone_polys.items()):
                     poly_draw = self.vis_poly(poly)
-
                     q = np.vstack([poly_draw, poly_draw[0]])
-
-                    self.ax_main.plot(
-                        q[:, 0],
-                        q[:, 1],
-                        color="deepskyblue",
-                        lw=1.0,
-                        ls="--",
-                        alpha=0.55,
-                        zorder=1,
-                    )
-
+                    self.ax_main.plot(q[:, 0], q[:, 1], color="deepskyblue", lw=1.0,
+                                      ls="--", alpha=0.55, zorder=1)
                     c = poly_draw.mean(axis=0)
-
-                    self.ax_main.text(
-                        c[0],
-                        c[1],
-                        f"B{zid}",
-                        color="deepskyblue",
-                        fontsize=8,
-                        ha="center",
-                        va="center",
-                        zorder=2,
-                    )
-
-            if (
-                self.model.intersection_poly is not None
-                and len(self.model.intersection_poly) >= 3
-            ):
+                    self.ax_main.text(c[0], c[1], f"B{zid}", color="deepskyblue", fontsize=8,
+                                      ha="center", va="center", zorder=2)
+            if self.model.intersection_poly is not None and len(self.model.intersection_poly) >= 3:
                 poly_draw = self.vis_poly(self.model.intersection_poly)
-
                 q = np.vstack([poly_draw, poly_draw[0]])
-
-                self.ax_main.fill(
-                    poly_draw[:, 0],
-                    poly_draw[:, 1],
-                    color="gold",
-                    alpha=0.15,
-                    zorder=1,
-                )
-
-                self.ax_main.plot(
-                    q[:, 0],
-                    q[:, 1],
-                    color="gold",
-                    lw=2.5,
-                    zorder=2,
-                )
-
+                self.ax_main.fill(poly_draw[:, 0], poly_draw[:, 1], color="gold",
+                                  alpha=0.15, zorder=1)
+                self.ax_main.plot(q[:, 0], q[:, 1], color="gold", lw=2.5, zorder=2)
                 c = poly_draw.mean(axis=0)
-
-                self.ax_main.text(
-                    c[0],
-                    c[1],
-                    "INTERSECTION",
-                    color="darkorange",
-                    weight="bold",
-                    fontsize=10,
-                    ha="center",
-                    va="center",
-                    bbox=dict(
-                        boxstyle="round,pad=0.25",
-                        fc="black",
-                        ec="gold",
-                        alpha=0.7,
-                    ),
-                    zorder=7,
-                )
+                self.ax_main.text(c[0], c[1], "INTERSECTION", color="darkorange", weight="bold",
+                                  fontsize=10, ha="center", va="center",
+                                  bbox=dict(boxstyle="round,pad=0.25", fc="black",
+                                            ec="gold", alpha=0.7),
+                                  zorder=7)
 
         def draw_entries(self):
             self.draw_topology()
             colors = plt.cm.tab10.colors
             for cid, (center, w, h, ang) in enumerate(self.model.entry_ellipses):
-                E = ellipse_poly(center, w, h, ang)
-
-                E_occ = self.vis_poly(E)
-
+                E_occ = self.vis_poly(ellipse_poly(center, w, h, ang))
                 cx, cy = self.vis_xy(center[0], center[1])
+                self.ax_main.plot(E_occ[:, 0], E_occ[:, 1], color=colors[cid % 10],
+                                  lw=2, alpha=0.9, zorder=2)
+                self.ax_main.scatter([cx], [cy], c=[colors[cid % 10]], s=60,
+                                     edgecolor="k", zorder=5)
+                self.ax_main.text(cx, cy, f"ID {cid}", fontsize=9, ha="center", va="bottom")
 
-                self.ax_main.plot(
-                    E_occ[:, 0],
-                    E_occ[:, 1],
-                    color=colors[cid % 10],
-                    lw=2,
-                    alpha=0.9,
-                    zorder=2,
-                )
-
-                self.ax_main.scatter(
-                    [cx],
-                    [cy],
-                    c=[colors[cid % 10]],
-                    s=60,
-                    edgecolor="k",
-                    zorder=5,
-                )
-
-                self.ax_main.text(
-                    cx,
-                    cy,
-                    f"ID {cid}",
-                    fontsize=9,
-                    ha="center",
-                    va="bottom",
-                )
-
-        # ---------- Main update ----------
+        # ---------- main update ----------
         def update_all(self):
             if self.use_frame_mode and self.frame_list:
                 ts = self.frame_list[self.current_frame]
-
                 if ts != self.current_bev_ts:
                     self.current_bev = self.load_bev_image(ts)
                     self.current_bev_ts = ts
             self.ax_main.clear()
             self._draw_background()
             if self.use_frame_mode:
-                # List active objects this frame
                 objs = self.frame_objects[self.current_frame]
                 active_tids = sorted(objs.keys())
-                #
-                # Preserve current selection across refreshes
-                #
+                # Preserve current selection across refreshes.
                 old_text = self.cb_objects.currentText()
                 self.cb_objects.blockSignals(True)
                 self.cb_objects.clear()
                 for tid in active_tids:
                     self.cb_objects.addItem(str(tid))
-                if old_text:
-                    idx = self.cb_objects.findText(old_text)
-                    if idx >= 0:
-                        self.cb_objects.setCurrentIndex(idx)
+                if old_text and self.cb_objects.findText(old_text) >= 0:
+                    self.cb_objects.setCurrentIndex(self.cb_objects.findText(old_text))
                 self.cb_objects.blockSignals(False)
-                # Draw all active points
                 for tid, (x, y) in objs.items():
                     px, py = self.vis_xy(x, y)
-
-                    self.ax_main.scatter(
-                        [px],
-                        [py],
-                        s=70,
-                        label=f"ID {tid}",
-                        zorder=4,
-                    )
-
-                    self.ax_main.text(
-                        px,
-                        py,
-                        str(tid),
-                        fontsize=9,
-                        zorder=5,
-                    )
+                    self.ax_main.scatter([px], [py], s=70, label=f"ID {tid}", zorder=4)
+                    self.ax_main.text(px, py, str(tid), fontsize=9, zorder=5)
                 self.draw_entries()
-                # If nothing active, just refresh canvases and return
                 if not active_tids:
                     self.ax_main.set_title(
-                        f"Frame {self.current_frame + 1}/{len(self.frame_list)} — no active objects"
-                    )
+                        f"Frame {self.current_frame + 1}/{len(self.frame_list)} — no active objects")
                     self.canvas_main.draw()
-                    self.ax_route.clear()
-                    self.canvas_route.draw()
-                    self.ax_micro.clear()
-                    self.canvas_micro.draw()
+                    self.ax_route.clear(); self.canvas_route.draw()
+                    self.ax_micro.clear(); self.canvas_micro.draw()
                     self.table.setRowCount(0)
                     self._sync_prefix_slider()
                     return
-                # Selected object
-                if self.selected_tid is not None and self.selected_tid in active_tids:
-                    sel_tid = self.selected_tid
-                else:
-                    sel_tid = active_tids[0]
-                    self.selected_tid = sel_tid
-                # Update per-object online state up to this frame
-                # (replays if needed to keep hysteresis)
+                sel_tid = self.selected_tid if self.selected_tid in active_tids else active_tids[0]
+                self.selected_tid = sel_tid
                 online_sel, prefix_sel = self.pool.update_to_frame(
-                    sel_tid, self.tid_frame_history.get(sel_tid, []), self.current_frame
-                )
-                # Draw selected object's trajectory prefix (thin)
+                    sel_tid, self.tid_frame_history.get(sel_tid, []), self.current_frame)
                 if prefix_sel is not None:
                     prefix_draw = np.asarray([self.vis_xy(x, y) for x, y in prefix_sel])
-
-                    self.ax_main.plot(
-                        prefix_draw[:, 0],
-                        prefix_draw[:, 1],
-                        color="tab:blue",
-                        lw=2,
-                        zorder=3,
-                    )
-                    self.ax_main.scatter(
-                        prefix_draw[-1, 0],
-                        prefix_draw[-1, 1],
-                        c="yellow",
-                        edgecolor="k",
-                        s=60,
-                        zorder=6,
-                    )
-                # Route & micro panels for selected object
+                    self.ax_main.plot(prefix_draw[:, 0], prefix_draw[:, 1],
+                                      color="tab:blue", lw=2, zorder=3)
+                    self.ax_main.scatter(prefix_draw[-1, 0], prefix_draw[-1, 1], c="yellow",
+                                         edgecolor="k", s=60, zorder=6)
                 if prefix_sel is not None and len(prefix_sel) >= 6:
-                    # predict top-k
                     classes, probs, unc = self.model.predict_segment_ml(prefix_sel)
                     info = online_sel._cached_info
                     labels = [f"{a}->{b}" for (a, b) in classes]
@@ -2722,37 +1576,23 @@ def run_gui(
                     self.ax_route.set_xlim(0, 1)
                     self.ax_route.set_title(f"Route (unc={unc:.2f})")
                     self.canvas_route.draw()
-                    # micro
                     mp = info["mode_probs"]
                     self.ax_micro.clear()
-                    self.ax_micro.barh(
-                        ["moving", "loading", "stationary"],
-                        [mp["moving"], mp["loading"], mp["stationary"]],
-                        color=["tab:gray", "tab:orange", "tab:green"],
-                    )
+                    self.ax_micro.barh(["moving", "loading", "stationary"],
+                                       [mp["moving"], mp["loading"], mp["stationary"]],
+                                       color=["tab:gray", "tab:orange", "tab:green"])
                     self.ax_micro.set_xlim(0, 1)
                     self.ax_micro.set_title(f"Maneuver = {info['mode']}")
                     self.canvas_micro.draw()
-                    # Heatmap overlay for selected object
                     if self.chk_overlay.isChecked():
-                        _, parts = forecast_particles(
-                            prefix_sel,
-                            online_sel,
-                            horizon=5,
-                            n_particles=1200,
-                            seed=42,
-                            use_progress_dyn=self.use_progress_dyn,
-                        )
+                        _, parts = forecast_particles(prefix_sel, online_sel, horizon=5,
+                                                      n_particles=1200, seed=42,
+                                                      use_progress_dyn=self.use_progress_dyn)
                         parts_vis = np.asarray([self.vis_xy(x, y) for x, y in parts])
-
-                        draw_heatmap_and_ci95_on_ax(
-                            self.ax_main, parts_vis, label="CI95 (H=1)"
-                        )
-
+                        draw_heatmap_and_ci95_on_ax(self.ax_main, parts_vis, label="CI95 (H=1)")
                     self.ax_main.set_title(
                         f"Frame {self.current_frame + 1}/{len(self.frame_list)} — Selected TID {sel_tid} "
-                        f"{info['display_label']} (conf={info['display_confidence']:.2f})"
-                    )
+                        f"{info['display_label']} (conf={info['display_confidence']:.2f})")
                 else:
                     self.ax_route.clear()
                     self.ax_route.set_title("Route (insufficient prefix)")
@@ -2761,108 +1601,62 @@ def run_gui(
                     self.ax_micro.set_title("Maneuver (insufficient prefix)")
                     self.canvas_micro.draw()
                     self.ax_main.set_title(
-                        f"Frame {self.current_frame + 1}/{len(self.frame_list)} — Selected TID {sel_tid} (insufficient prefix)"
-                    )
-                # Table: predictions for all active objects
+                        f"Frame {self.current_frame + 1}/{len(self.frame_list)} — "
+                        f"Selected TID {sel_tid} (insufficient prefix)")
+                # Table: predictions for all active objects.
                 rows = []
                 for tid in active_tids:
                     online_i, prefix_i = self.pool.update_to_frame(
-                        tid, self.tid_frame_history.get(tid, []), self.current_frame
-                    )
+                        tid, self.tid_frame_history.get(tid, []), self.current_frame)
                     if prefix_i is None or len(prefix_i) < 6:
                         rows.append((tid, "-", np.nan, "-", np.nan, np.nan, np.nan))
                         continue
                     info_i = online_i._cached_info
-                    rows.append(
-                        (
-                            tid,
-                            info_i["display_label"],
-                            info_i["display_confidence"],
-                            info_i["mode"],
-                            info_i["mode_probs"]["moving"],
-                            info_i["mode_probs"]["loading"],
-                            info_i["mode_probs"]["stationary"],
-                        )
-                    )
+                    rows.append((tid, info_i["display_label"], info_i["display_confidence"],
+                                 info_i["mode"], info_i["mode_probs"]["moving"],
+                                 info_i["mode_probs"]["loading"],
+                                 info_i["mode_probs"]["stationary"]))
                 self.table.setRowCount(len(rows))
                 for r, row in enumerate(rows):
                     for c, val in enumerate(row):
-                        item = QtWidgets.QTableWidgetItem(
-                            ""
-                            if (isinstance(val, float) and np.isnan(val))
-                            else str(val)
-                        )
-                        self.table.setItem(r, c, item)
+                        self.table.setItem(r, c, QtWidgets.QTableWidgetItem(
+                            "" if (isinstance(val, float) and np.isnan(val)) else str(val)))
                 self.ax_main.set_xlabel("X")
                 self.ax_main.set_ylabel("Y")
                 self.ax_main.legend(loc="best")
                 self.canvas_main.draw()
                 self._sync_prefix_slider()
                 return
-            # ------- Trajectory mode (original) -------
+            # ---- trajectory mode ----
             if not self.tids:
                 self.ax_main.set_title("No trajectories loaded")
                 self.canvas_main.draw()
                 return
             arr = self.trajs[self.cur_tid]
-            if self.cur_idx <= 6:
-                self.cur_idx = 6
-            seg = arr[: self.cur_idx]
-            # Draw trajectory
+            self.cur_idx = max(6, self.cur_idx)
+            seg = arr[:self.cur_idx]
             arr_draw = np.asarray([self.vis_xy(x, y) for x, y in arr])
-
             seg_draw = np.asarray([self.vis_xy(x, y) for x, y in seg])
-
-            self.ax_main.plot(
-                arr_draw[:, 0],
-                arr_draw[:, 1],
-                color="lightgray",
-                lw=0.8,
-                alpha=0.6,
-                zorder=1,
-            )
-
-            self.ax_main.plot(
-                seg_draw[:, 0],
-                seg_draw[:, 1],
-                color="tab:blue",
-                lw=2,
-                zorder=3,
-            )
-
-            self.ax_main.scatter(
-                seg_draw[-1, 0],
-                seg_draw[-1, 1],
-                c="yellow",
-                edgecolor="k",
-                s=60,
-                zorder=5,
-            )
-
+            self.ax_main.plot(arr_draw[:, 0], arr_draw[:, 1], color="lightgray",
+                              lw=0.8, alpha=0.6, zorder=1)
+            self.ax_main.plot(seg_draw[:, 0], seg_draw[:, 1], color="tab:blue", lw=2, zorder=3)
+            self.ax_main.scatter(seg_draw[-1, 0], seg_draw[-1, 1], c="yellow",
+                                 edgecolor="k", s=60, zorder=5)
             self.draw_entries()
-            # Predictions
             info = self.online_single.update(seg)
             if self.chk_overlay.isChecked():
-                _, parts = forecast_particles(
-                    seg,
-                    self.online_single,
-                    horizon=5,
-                    n_particles=1200,
-                    seed=42,
-                    use_progress_dyn=self.use_progress_dyn,
-                )
+                _, parts = forecast_particles(seg, self.online_single, horizon=5,
+                                              n_particles=1200, seed=42,
+                                              use_progress_dyn=self.use_progress_dyn)
                 parts_vis = np.asarray([self.vis_xy(x, y) for x, y in parts])
-
                 draw_heatmap_and_ci95_on_ax(self.ax_main, parts_vis, label="CI95 (H=1)")
             self.ax_main.set_title(
                 f"Trajectory {self.cur_tid} [{self.cur_idx}/{len(arr)}] "
-                f"{info['display_label']} (conf={info['display_confidence']:.2f})"
-            )
+                f"{info['display_label']} (conf={info['display_confidence']:.2f})")
             self.ax_main.set_xlabel("X")
             self.ax_main.set_ylabel("Y")
             self.ax_main.legend(loc="best")
             self.canvas_main.draw()
-            # Route panel
             classes, probs, unc = self.model.predict_segment_ml(seg)
             labels = [f"{a}->{b}" for (a, b) in classes]
             self.ax_route.clear()
@@ -2870,537 +1664,217 @@ def run_gui(
             self.ax_route.set_xlim(0, 1)
             self.ax_route.set_title(f"Route (unc={unc:.2f})")
             self.canvas_route.draw()
-            # Micro panel
             mp = info["mode_probs"]
             self.ax_micro.clear()
-            self.ax_micro.barh(
-                ["moving", "loading", "stationary"],
-                [mp["moving"], mp["loading"], mp["stationary"]],
-                color=["tab:gray", "tab:orange", "tab:green"],
-            )
+            self.ax_micro.barh(["moving", "loading", "stationary"],
+                               [mp["moving"], mp["loading"], mp["stationary"]],
+                               color=["tab:gray", "tab:orange", "tab:green"])
             self.ax_micro.set_xlim(0, 1)
             self.ax_micro.set_title(f"Maneuver = {info['mode']}")
             self.canvas_micro.draw()
             self._sync_prefix_slider()
 
-        # ---------- Heatmaps dialog ----------
+        # ---------- heatmaps dialog ----------
         def show_heatmaps(self):
-            from PyQt6 import QtWidgets
-
+            parts_list = []
             if self.use_frame_mode:
-                # Selected object
                 try:
                     sel_tid = int(self.cb_objects.currentText())
                 except Exception:
-                    QtWidgets.QMessageBox.information(
-                        self, "No object", "No active object selected."
-                    )
+                    QtWidgets.QMessageBox.information(self, "No object", "No active object selected.")
                     return
                 online_sel, prefix_sel = self.pool.update_to_frame(
-                    sel_tid, self.tid_frame_history.get(sel_tid, []), self.current_frame
-                )
+                    sel_tid, self.tid_frame_history.get(sel_tid, []), self.current_frame)
                 if prefix_sel is None or len(prefix_sel) < 6:
                     QtWidgets.QMessageBox.information(
-                        self,
-                        "Insufficient prefix",
-                        "Not enough history to plot heatmaps.",
-                    )
+                        self, "Insufficient prefix", "Not enough history to plot heatmaps.")
                     return
-                info1, p1 = forecast_particles(
-                    prefix_sel,
-                    online_sel,
-                    horizon=1,
-                    n_particles=1500,
-                    seed=1,
-                    use_progress_dyn=self.use_progress_dyn,
-                )
-                info2, p2 = forecast_particles(
-                    prefix_sel,
-                    online_sel,
-                    horizon=2,
-                    n_particles=1500,
-                    seed=2,
-                    use_progress_dyn=self.use_progress_dyn,
-                )
-                info3, p3 = forecast_particles(
-                    prefix_sel,
-                    online_sel,
-                    horizon=3,
-                    n_particles=1500,
-                    seed=3,
-                    use_progress_dyn=self.use_progress_dyn,
-                )
+                for H in (1, 2, 3):
+                    _, p = forecast_particles(prefix_sel, online_sel, horizon=H, n_particles=1500,
+                                              seed=H, use_progress_dyn=self.use_progress_dyn)
+                    parts_list.append(p)
             else:
-                arr = self.trajs[self.cur_tid]
-                seg = arr[: self.cur_idx]
-                info1, p1 = forecast_particles(
-                    seg,
-                    self.online_single,
-                    horizon=1,
-                    n_particles=1500,
-                    seed=1,
-                    use_progress_dyn=self.use_progress_dyn,
-                )
-                info2, p2 = forecast_particles(
-                    seg,
-                    self.online_single,
-                    horizon=2,
-                    n_particles=1500,
-                    seed=2,
-                    use_progress_dyn=self.use_progress_dyn,
-                )
-                info3, p3 = forecast_particles(
-                    seg,
-                    self.online_single,
-                    horizon=3,
-                    n_particles=1500,
-                    seed=3,
-                    use_progress_dyn=self.use_progress_dyn,
-                )
+                seg = self.trajs[self.cur_tid][:self.cur_idx]
+                for H in (1, 2, 3):
+                    _, p = forecast_particles(seg, self.online_single, horizon=H, n_particles=1500,
+                                              seed=H, use_progress_dyn=self.use_progress_dyn)
+                    parts_list.append(p)
             dlg = QtWidgets.QDialog(self)
             dlg.setWindowTitle("Future position heatmaps (H=1,2,3)")
             lay = QtWidgets.QVBoxLayout(dlg)
             fig = Figure(figsize=(10, 3), tight_layout=True)
             axs = [fig.add_subplot(131), fig.add_subplot(132), fig.add_subplot(133)]
-            for H, ax, parts in zip([1, 2, 3], axs, [p1, p2, p3]):
+            for H, ax, parts in zip([1, 2, 3], axs, parts_list):
                 H2, xe, ye = np.histogram2d(parts[:, 0], parts[:, 1], bins=100)
                 ax.pcolormesh(xe, ye, H2.T, cmap="magma", shading="auto")
-                ax.scatter(
-                    [parts.mean(axis=0)[0]], [parts.mean(axis=0)[1]], c="cyan", s=25
-                )
+                ax.scatter([parts.mean(axis=0)[0]], [parts.mean(axis=0)[1]], c="cyan", s=25)
                 ax.set_title(f"H={H}")
             lay.addWidget(FigureCanvas(fig))
             dlg.exec()
 
-        # ---------- Export predictions to JSON ----------
-        def _compute_predictions_all_frames(self) -> list:
-            """
-            Returns a list aligned with frames:
-              [
-                { "time_stamp": ..., "predictions": [
-                     { "track_id": tid, "route": {"from": a, "to": b, "prob": p, "uncertainty": u},
-                       "mode": m, "mode_probs": {"moving":..., "loading":..., "stationary":...} }, ...
-                  ] },
-                ...
-              ]
-            """
+        # ---------- export predictions to JSON ----------
+        def _compute_predictions_all_frames(self):
             if not self.use_frame_mode:
                 return []
-            # reset pool to ensure a clean deterministic pass
-            self.pool.reset()
+            self.pool.reset()                     # clean deterministic pass
             out = []
             for fi, ts in enumerate(self.frame_list):
                 preds = []
-                objs = self.frame_objects[fi]
-                for tid in sorted(objs.keys()):
+                for tid in sorted(self.frame_objects[fi].keys()):
                     online_i, prefix_i = self.pool.update_to_frame(
-                        tid, self.tid_frame_history.get(tid, []), fi
-                    )
-                    if prefix_i is None or len(prefix_i) < 6:
-                        continue
-                    info_i = online_i._cached_info
-                    a, b = info_i["route_pair"]
-                    preds.append(
-                        {
-                            "track_id": int(tid),
-                            "route": {
-                                "from": int(a),
-                                "to": int(b),
-                                "prob": float(
-                                    info_i["route_prob"]
-                                ),
-                                "uncertainty": float(
-                                    info_i["route_uncertainty"]
-                                ),
-                            },
-                            "topology": {
-                                "zone":
-                                    info_i.get(
-                                        "topology_zone"
-                                    ),
-                                "label":
-                                    info_i.get(
-                                        "topology_label"
-                                    ),
-                                "confidence":
-                                    float(
-                                        info_i.get(
-                                            "topology_confidence",
-                                            0.0
-                                        )
-                                    ),
-                            },
-                            "mode": info_i["mode"],
-                            "mode_probs": {
-                                k: float(v) for k, v in info_i["mode_probs"].items()
-                            },
-                            "display_label": info_i["display_label"],
-                            "display_confidence": float(info_i["display_confidence"]),
-                        }
-                    )
+                        tid, self.tid_frame_history.get(tid, []), fi)
+                    if prefix_i is not None and len(prefix_i) >= 6:
+                        preds.append(build_prediction_record(tid, online_i._cached_info))
                 out.append({"time_stamp": ts, "predictions": preds})
             return out
 
         def save_predictions_dialog(self):
-            from PyQt6 import QtWidgets
-
             if not self.use_frame_mode:
                 QtWidgets.QMessageBox.information(
-                    self, "Frame-mode only", "Export is only available in frame-mode."
-                )
+                    self, "Frame-mode only", "Export is only available in frame-mode.")
                 return
-            # Compute predictions
             preds = self._compute_predictions_all_frames()
-            if len(preds) == 0:
-                QtWidgets.QMessageBox.information(
-                    self, "No predictions", "No predictions to save."
-                )
+            if not preds:
+                QtWidgets.QMessageBox.information(self, "No predictions", "No predictions to save.")
                 return
-            # Choose path (default near original file)
-            default_name = "predictions_" + (
-                os.path.basename(self.source_json_path)
-                if self.source_json_path
-                else "frames.json"
-            )
+            default_name = "predictions_" + (os.path.basename(self.source_json_path)
+                                             if self.source_json_path else "frames.json")
             out_path, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Save predictions", default_name, "JSON (*.json)"
-            )
+                self, "Save predictions", default_name, "JSON (*.json)")
             if not out_path:
                 return
             try:
                 with open(out_path, "w") as f:
                     json.dump(preds, f, indent=2)
-                QtWidgets.QMessageBox.information(
-                    self, "Saved", f"Predictions saved to:\n{out_path}"
-                )
+                QtWidgets.QMessageBox.information(self, "Saved", f"Predictions saved to:\n{out_path}")
             except Exception as e:
-                QtWidgets.QMessageBox.critical(
-                    self, "Error", f"Could not save predictions:\n{e}"
-                )
+                QtWidgets.QMessageBox.critical(self, "Error", f"Could not save predictions:\n{e}")
 
-    # Launch window
-    w = TrajPlayer(
-        trajs,
-        model,
-        online,
-        frame_list=frame_list,
-        frame_objects=frame_objects,
-        tid_frame_history=tid_frame_history,
-        orig_frames=orig_frames,
-        source_json_path=source_json_path,
-    )
+    w = TrajPlayer(trajs, model, online,
+                   frame_list=frame_list, frame_objects=frame_objects,
+                   tid_frame_history=tid_frame_history, orig_frames=orig_frames,
+                   source_json_path=source_json_path)
     w.resize(1280, 900)
     w.show()
     sys.exit(app.exec())
 
-
-# ===== Main (CLI) =====
+# ==========================================================
+# CLI
+# ==========================================================
 def main():
-    parser = argparse.ArgumentParser(
-        description="Trajectory ML + Micro Maneuvers + GUI (frame-aware)"
-    )
-    parser.add_argument(
-        "--data",
-        type=str,
-        default=DATA_PATH,
-        help="Path to trajectories JSON",
-    )
+    parser = argparse.ArgumentParser(description="Trajectory ML + Micro Maneuvers + GUI (frame-aware)")
+    parser.add_argument("--data", type=str, default=DATA_PATH, help="Path to trajectories JSON")
     parser.add_argument("--entries", type=int, default=7, help="K (entry areas)")
     parser.add_argument("--codebook", type=int, default=16, help="K (step codebook)")
     parser.add_argument("--pca", type=int, default=5, help="PCA components for shape")
-    parser.add_argument(
-        "--win", type=int, default=25, help="Window size for micro mode"
-    )
-    parser.add_argument(
-        "--progress-dyn", action="store_true", help="Use class progress-aware dynamics"
-    )
-    parser.add_argument(
-        "--demo", action="store_true", help="Train & forecast demo (no GUI)"
-    )
-    parser.add_argument(
-        "--report", action="store_true", help="Create accuracy vs prefix report PNG"
-    )
+    parser.add_argument("--win", type=int, default=25, help="Window size for micro mode")
+    parser.add_argument("--progress-dyn", action="store_true", help="Use class progress-aware dynamics")
+    parser.add_argument("--demo", action="store_true", help="Train & forecast demo (no GUI)")
+    parser.add_argument("--report", action="store_true", help="Create accuracy vs prefix report PNG")
     parser.add_argument("--gui", action="store_true", help="Launch GUI (load or train)")
-    parser.add_argument(
-        "--export-pred",
-        type=str,
-        default=None,
-        help="Export predictions to JSON (frame-based input only, headless)",
-    )
+    parser.add_argument("--export-pred", type=str, default=None,
+                        help="Export predictions to JSON (frame-based input only, headless)")
     args = parser.parse_args()
 
-    # ------------------------------------------------------------------
-    # Shared model selection helpers
-    # ------------------------------------------------------------------
-    def get_model_entry_count(path):
-        try:
-            with np.load(path, allow_pickle=True) as d:
-                if "entry_centers" in d:
-                    return len(d["entry_centers"])
-        except Exception:
-            pass
-        return None
-
     def select_or_train_model(trajs):
+        def train():
+            print("\nTraining new model...\n")
+            m = auto_tune_and_train_ml(trajs, K_ENTRIES=args.entries,
+                                       K_CODE=args.codebook, N_PCA=args.pca)
+            p = timestamped_model_path()
+            m.save(p)
+            print(f"Trained and saved: {p}")
+            return m
         saved = sorted(list_saved_models(), key=os.path.getmtime, reverse=True)
         if not saved:
             print("\nNo saved models found.")
-            print("Training new model...\n")
-            model = auto_tune_and_train_ml(
-                trajs, K_ENTRIES=args.entries, K_CODE=args.codebook, N_PCA=args.pca
-            )
-            path = timestamped_model_path()
-            model.save(path)
-            print(f"Trained and saved: {path}")
-            return model
+            return train()
         if len(saved) == 1:
-            count = get_model_entry_count(saved[0])
-            print(
-                f"\nLoading saved model:\n"
-                f"  {os.path.basename(saved[0])} "
-                f"({count} entries)\n"
-            )
+            print(f"\nLoading saved model:\n  {os.path.basename(saved[0])} "
+                  f"({get_model_entry_count(saved[0])} entries)\n")
             return ensure_model_topology(MLModel.load(saved[0]), trajs)
         print("\nMultiple saved models found:\n")
         for idx, path in enumerate(saved, start=1):
             count = get_model_entry_count(path)
-            marker = ""
-            if count == args.entries:
-                marker = "  <-- matches --entries"
+            marker = "  <-- matches --entries" if count == args.entries else ""
             print(f"{idx:2d}. {os.path.basename(path)} ({count} entries){marker}")
         print("\n 0. Train new model")
         while True:
             try:
                 selection = int(input("\nSelect model number: ").strip())
-                if selection == 0:
-                    print("\nTraining new model...\n")
-                    model = auto_tune_and_train_ml(
-                        trajs,
-                        K_ENTRIES=args.entries,
-                        K_CODE=args.codebook,
-                        N_PCA=args.pca,
-                    )
-                    path = timestamped_model_path()
-                    model.save(path)
-                    print(f"Trained and saved: {path}")
-                    return model
-                if 1 <= selection <= len(saved):
-                    chosen = saved[selection - 1]
-                    count = get_model_entry_count(chosen)
-                    print(
-                        f"\nLoading model:\n"
-                        f"  {os.path.basename(chosen)} "
-                        f"({count} entries)\n"
-                    )
-                    return ensure_model_topology(MLModel.load(chosen), trajs)
-                print("Invalid selection.")
             except ValueError:
                 print("Please enter a valid number.")
+                continue
+            if selection == 0:
+                return train()
+            if 1 <= selection <= len(saved):
+                chosen = saved[selection - 1]
+                print(f"\nLoading model:\n  {os.path.basename(chosen)} "
+                      f"({get_model_entry_count(chosen)} entries)\n")
+                return ensure_model_topology(MLModel.load(chosen), trajs)
+            print("Invalid selection.")
 
-    # ------------------------------------------------------------------
-    # Detect input format
-    # ------------------------------------------------------------------
-    with open(args.data, "r") as f:
+    # ---- detect input format ----
+    with open(args.data) as f:
         head = json.load(f)
     is_frame = isinstance(head, list)
     if is_frame:
-        frame_list, frame_objects, tid_frame_history, raw_frames = load_frame_based(
-            args.data
-        )
-        trajs_for_train = {}
+        frame_list, frame_objects, tid_frame_history, raw_frames = load_frame_based(args.data)
+        trajs = {}
         for tid, hist in tid_frame_history.items():
-            pts = [xy for (fi, xy) in hist]
+            pts = [xy for (_fi, xy) in hist]
             if len(pts) >= 3:
-                trajs_for_train[tid] = np.asarray(pts, dtype=float)
-        if not trajs_for_train:
-            print(
-                "Warning: No sufficient trajectories extracted "
-                "from frame-based file; training may not work."
-            )
-        trajs = trajs_for_train
+                trajs[tid] = np.asarray(pts, dtype=float)
+        if not trajs:
+            print("Warning: No sufficient trajectories extracted "
+                  "from frame-based file; training may not work.")
     else:
-        frame_list = None
-        frame_objects = None
-        tid_frame_history = None
-        raw_frames = None
+        frame_list = frame_objects = tid_frame_history = raw_frames = None
         trajs = load_trajectories(args.data)
-    print(
-        f"Loaded "
-        f"{'frame-based' if is_frame else 'trajectory-based'} "
-        f"data from {args.data}"
-    )
-    # ------------------------------------------------------------------
-    # REPORT MODE
-    # ------------------------------------------------------------------
+    print(f"Loaded {'frame-based' if is_frame else 'trajectory-based'} data from {args.data}")
+
+    # ---- report mode ----
     if args.report:
         model = select_or_train_model(trajs)
         res = evaluate_prefix_accuracy(trajs, model)
-        out = os.path.join(
-            models_dir(), f"report_acc_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        )
+        out = os.path.join(models_dir(), f"report_acc_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
         save_accuracy_plot(res, out)
         print(f"Saved accuracy report: {out}")
         return
-    # ------------------------------------------------------------------
-    # EXPORT MODE
-    # ------------------------------------------------------------------
+
+    # ---- export mode ----
     if is_frame and args.export_pred:
-
         model = select_or_train_model(trajs)
-
-        T = auto_tune_mode_thresholds(
-            trajs,
-            win=args.win,
-            rev_angle_deg=120.0,
-        )
-
-        pool = OnlinePool(
-            model,
-            T,
-            window=args.win,
-            enter_baf=3,
-            exit_baf=5,
-        )
-
+        T = auto_tune_mode_thresholds(trajs, win=args.win, rev_angle_deg=120.0)
+        pool = OnlinePool(model, T, window=args.win, enter_baf=3, exit_baf=5)
         total_frames = len(frame_list)
-
-        print(
-            f"Exporting predictions "
-            f"for {total_frames} frames..."
-        )
-
+        print(f"Exporting predictions for {total_frames} frames...")
         pool.reset()
-
         with open(args.export_pred, "w") as f:
-
             f.write("[\n")
-
             first_frame = True
-
             for fi, ts in enumerate(frame_list):
-
                 if fi % 250 == 0:
-
-                    pct = 100.0 * fi / total_frames
-
-                    print(
-                        f"\r{fi}/{total_frames} "
-                        f"({pct:.1f}%)",
-                        end="",
-                        flush=True,
-                    )
-
+                    print(f"\r{fi}/{total_frames} ({100.0 * fi / total_frames:.1f}%)",
+                          end="", flush=True)
                 preds = []
-
-                objs = frame_objects[fi]
-
-                for tid in sorted(objs.keys()):
-
-                    hist = tid_frame_history.get(
-                        tid,
-                        [],
-                    )
-
+                for tid in sorted(frame_objects[fi].keys()):
                     online_i, prefix_i = pool.update_to_frame(
-                        tid,
-                        hist,
-                        fi,
-                    )
-
-                    if prefix_i is None or len(prefix_i) < 6:
-                        continue
-
-                    info_i = online_i._cached_info
-
-                    a, b = info_i["route_pair"]
-
-                    preds.append(
-                        {
-                            "track_id": int(tid),
-
-                            "route": {
-                                "from": int(a),
-                                "to": int(b),
-                                "prob": float(
-                                    info_i["route_prob"]
-                                ),
-                                "uncertainty": float(
-                                    info_i["route_uncertainty"]
-                                ),
-                            },
-
-                            "topology": {
-                                "zone":
-                                    info_i.get(
-                                        "topology_zone"
-                                    ),
-
-                                "label":
-                                    info_i.get(
-                                        "topology_label"
-                                    ),
-
-                                "confidence":
-                                    float(
-                                        info_i.get(
-                                            "topology_confidence",
-                                            0.0
-                                        )
-                                    ),
-                            },
-
-                            "mode":
-                                info_i["mode"],
-
-                            "mode_probs": {
-                                k: float(v)
-                                for k, v in
-                                info_i["mode_probs"].items()
-                            },
-
-                            "display_label":
-                                info_i["display_label"],
-
-                            "display_confidence":
-                                float(
-                                    info_i[
-                                        "display_confidence"
-                                    ]
-                                ),
-                        }
-                    )
-
-                frame_obj = {
-                    "time_stamp": ts,
-                    "predictions": preds,
-                }
-
+                        tid, tid_frame_history.get(tid, []), fi)
+                    if prefix_i is not None and len(prefix_i) >= 6:
+                        preds.append(build_prediction_record(tid, online_i._cached_info))
                 if not first_frame:
                     f.write(",\n")
-
-                json.dump(
-                    frame_obj,
-                    f,
-                    separators=(",", ":"),
-                )
-
+                json.dump({"time_stamp": ts, "predictions": preds}, f, separators=(",", ":"))
                 first_frame = False
-
             f.write("\n]\n")
-
-        print(
-            f"\nPredictions exported to: "
-            f"{args.export_pred}"
-        )
-
+        print(f"\nPredictions exported to: {args.export_pred}")
         return
-    # ------------------------------------------------------------------
-    # DEMO MODE
-    # ------------------------------------------------------------------
+
+    # ---- demo mode ----
     if args.demo:
-        model = auto_tune_and_train_ml(
-            trajs, K_ENTRIES=args.entries, K_CODE=args.codebook, N_PCA=args.pca
-        )
+        model = auto_tune_and_train_ml(trajs, K_ENTRIES=args.entries,
+                                       K_CODE=args.codebook, N_PCA=args.pca)
         savep = timestamped_model_path()
         model.save(savep)
         print(f"Saved model -> {savep}")
@@ -3413,33 +1887,16 @@ def main():
                 n = max(6, int(len(arr) * frac))
                 classes, probs, unc = model.predict_segment_ml(arr[:n])
                 print(f"prefix={n:5d} top1={classes[0]} p={probs[0]:.3f} unc={unc:.3f}")
-            seg = arr[: min(max(200, len(arr) // 3), len(arr) - 1)]
+            seg = arr[:min(max(200, len(arr) // 3), len(arr) - 1)]
             for H in (1, 2, 3):
-                info, parts = forecast_particles(
-                    seg,
-                    online,
-                    horizon=H,
-                    n_particles=3000,
-                    seed=H,
-                    use_progress_dyn=args.progress_dyn,
-                )
+                info, parts = forecast_particles(seg, online, horizon=H, n_particles=3000,
+                                                 seed=H, use_progress_dyn=args.progress_dyn)
                 H2, xe, ye = np.histogram2d(parts[:, 0], parts[:, 1], bins=100)
                 fig, ax = plt.subplots(figsize=(6, 5))
                 pcm = ax.pcolormesh(xe, ye, H2.T, cmap="magma", shading="auto")
-                ax.scatter(
-                    [seg[-1, 0]],
-                    [seg[-1, 1]],
-                    c="yellow",
-                    edgecolor="k",
-                    s=60,
-                    zorder=5,
-                )
-                ax.set_title(
-                    f"{info['display_label']} "
-                    f"H={H} "
-                    f"conf={info['display_confidence']:.2f} "
-                    f"progress_dyn={args.progress_dyn}"
-                )
+                ax.scatter([seg[-1, 0]], [seg[-1, 1]], c="yellow", edgecolor="k", s=60, zorder=5)
+                ax.set_title(f"{info['display_label']} H={H} conf={info['display_confidence']:.2f} "
+                             f"progress_dyn={args.progress_dyn}")
                 fig.colorbar(pcm, ax=ax, label="Density")
                 out = f"demo_forecast_H{H}.png"
                 fig.tight_layout()
@@ -3449,36 +1906,21 @@ def main():
         else:
             print("No trajectories available for demo.")
         return
-    # ------------------------------------------------------------------
-    # GUI MODE
-    # ------------------------------------------------------------------
+
+    # ---- GUI mode ----
     if args.gui:
         model = select_or_train_model(trajs)
         T = auto_tune_mode_thresholds(trajs, win=args.win, rev_angle_deg=120.0)
         online = OnlineClassifier(model, T, window=args.win, enter_baf=3, exit_baf=5)
-        run_gui(
-            trajs,
-            model,
-            online,
-            K_ENTRIES=args.entries,
-            K_CODE=args.codebook,
-            N_PCA=args.pca,
-            WIN=args.win,
-            use_progress_dyn=True,
-            frame_list=frame_list,
-            frame_objects=frame_objects,
-            tid_frame_history=tid_frame_history,
-            orig_frames=raw_frames,
-            source_json_path=args.data,
-        )
+        run_gui(trajs, model, online, K_ENTRIES=args.entries, K_CODE=args.codebook,
+                N_PCA=args.pca, WIN=args.win, use_progress_dyn=True,
+                frame_list=frame_list, frame_objects=frame_objects,
+                tid_frame_history=tid_frame_history, orig_frames=raw_frames,
+                source_json_path=args.data)
         return
-    print(
-        "Use --demo for a non-GUI run, "
-        "--report for accuracy plot, "
-        "--gui to launch the app, "
-        "or --export-pred to export predictions "
-        "(frame-based)."
-    )
+
+    print("Use --demo for a non-GUI run, --report for accuracy plot, "
+          "--gui to launch the app, or --export-pred to export predictions (frame-based).")
 
 
 if __name__ == "__main__":
